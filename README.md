@@ -13,3 +13,8 @@ Reference
 T. Kohonen. Self-Organizing Maps. Springer, Berlin, 1997.
 
 Martinez, T., Berkovich, G. and Schulten, K.J.: Neural Gas Network for Vector Quantization and its Application to Time-Series Prediction. In: IEEE Transactions on Neural Networks, 4, 4, 558- 569 (1993)
+
+Here is a comparison of the LVQ method as a classifier with other methods.
+
+![LVQ_classifier_comparison](https://github.com/wfthi/LearningVectorQuantizationClassifier/assets/94956037/aec4c3da-9106-4c5a-860d-3175bd1601d6)
+
