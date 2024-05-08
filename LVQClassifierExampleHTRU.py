@@ -43,6 +43,7 @@ from astroML.classification import GMMBayes
 from astroML.utils import split_samples, completeness_contamination
 # XGBoost
 from xgboost.sklearn import XGBClassifier  # use the XGBoost routine
+from sklearn.metrics import classification_report
 from LVQClassifier import LVQClassifier
 
 # This function adjusts matplotlib settings for a uniform feel in the textbook.
@@ -152,6 +153,7 @@ names = []
 probs = []
 preds = []
 F1 = []
+target_names = ['not pular', 'pulsar']
 
 for i, (name, classifier) in enumerate(classifiers.items()):
     print(name, classifier)
@@ -173,6 +175,8 @@ for i, (name, classifier) in enumerate(classifiers.items()):
     F1.append(f1_score(y_pred, y_test))
     names.append(name)
     clfs.append(model)
+    rp = classification_report(y_test, y_pred, target_names=target_names)
+    print(rp)
 
 # Save the model to disk
 if not (os.path.exists(filename)):
