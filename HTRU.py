@@ -51,9 +51,12 @@ from LVQClassifier import LVQClassifier
 # Note that with usetex=True, fonts are rendered with LaTeX.  This may
 # result in an error if LaTeX is not installed on your system.  In that case,
 # you can set usetex to False.
-from astroML.plotting import setup_text_plots
+#
+# note 2024/05/16 astroML is using Theano which is not compatible with the
+# recent numpy version 1.26.4 for setup_text_plots
+# from astroML.plotting import setup_text_plots
 import seaborn as sns; sns.set()
-setup_text_plots(fontsize=12, usetex=True)
+# setup_text_plots(fontsize=12, usetex=True)
 
 # get data and split into training & testing sets
 # fetch dataset from UCI
