@@ -16,6 +16,7 @@ from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
 from LVQClassifier import LVQClassifier as LVQ
+from xgboost import XGBClassifier
 
 """
 =====================
@@ -48,9 +49,9 @@ print(__doc__)
 
 h = .02  # step size in the mesh
 
-names = ["Nearest Neighbors", "Linear SVM", "RBF SVM", "Gaussian Process",
-         "Decision Tree", "Random Forest", "Neural Net", "AdaBoost",
-         "Naive Bayes", "QDA", "LVQ"]
+names = ["N. Neighbors", "SVM", "RBF SVM", "Gaussian Proc.",
+         "Decision Tree", "RF", "Neural Net", "AdaBoost",
+         "Naive Bayes", "QDA", "LVQ", 'XGBoost']
 
 classifiers = [
     KNeighborsClassifier(3),
@@ -63,7 +64,9 @@ classifiers = [
     AdaBoostClassifier(),
     GaussianNB(),
     QuadraticDiscriminantAnalysis(),
-    LVQ(n_components=7, epochs=10)]  # 2 classes -> odd n_components
+    LVQ(n_components=7, epochs=10),
+    XGBClassifier(n_estimators=200, max_depth=10,
+                  eval_metric='mae', random_state=42),]  # 2 classes -> odd n_components
 
 X, y = make_classification(n_features=2, n_redundant=0, n_informative=2,
                            random_state=1, n_clusters_per_class=1)
@@ -96,7 +99,7 @@ for ds_cnt, ds in enumerate(datasets):
     cm_bright = ListedColormap(['#FF0000', '#0000FF'])
     ax = plt.subplot(len(datasets), len(classifiers) + 1, i)
     if ds_cnt == 0:
-        ax.set_title("Input data")
+        ax.set_title("Input")
     # Plot the training points
     ax.scatter(X_train[:, 0], X_train[:, 1], c=y_train, cmap=cm_bright,
                edgecolors='k')
