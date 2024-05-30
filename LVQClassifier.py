@@ -18,6 +18,12 @@ class LVQClassifier():
 
     from Wikipedia:
 
+    "LVQ can be understood as a special case of an artificial neural network,
+    more precisely, it applies a winner-take-all Hebbian learning-based
+    approach. It is a precursor to self-organizing maps (SOM) and related to
+    neural gas and the k-nearest neighbor algorithm (k-NN).
+    LVQ was invented by Teuvo Kohonen.[1]"
+
     "An LVQ system is represented by prototypes W=(w(i),...,w(n))} which
     are defined in the feature space of observed data. In
     winner-take-all training algorithms one determines, for each data
@@ -46,6 +52,8 @@ class LVQClassifier():
     Martinez, T., Berkovich, G. and Schulten, K.J.: Neural Gas Network for
         Vector Quantization and its Application to Time-Series Prediction.
         In: IEEE Transactions on Neural Networks, 4, 4, 558- 569 (1993)
+
+    http://www.cis.hut.fi/panus/papers/dtwsom.pdf
 
     Author: Wing-Fai Thi, wingfai.thi@googlemail.com
 
