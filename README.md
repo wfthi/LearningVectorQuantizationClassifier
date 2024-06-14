@@ -8,6 +8,8 @@ An advantage of LVQ is that it creates prototypes that are easy to interpret for
 
 Two training methods are available. By default the standard LVQ training is used. LVQ2 training scheme is  used withen the flag LVQ2 is set to True. A variant of the Neural Gas scheme can be used instead of the standard LVQ scheme.
 
+A single-prototype LVQ method is provided to augment minority class data in imblanced datasets.
+
 Reference
 
 T. Kohonen. Self-Organizing Maps. Springer, Berlin, 1997.
