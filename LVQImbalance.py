@@ -56,7 +56,20 @@ def init_lvq3(X, y, seed=2024):
 
     Example
     -------
-    >>> Xm, W = init_lvq3(X, y)
+    >>> from LVQImbalance import *
+    >>> from sklearn.datasets import make_classification
+    >>> from sklearn.preprocessing import MinMaxScaler
+    >>> from LVQImbalance import *
+    >>> X, y = make_classification(n_samples=10000, n_features=2,
+    ...                            n_redundant=0,
+    ...                            n_clusters_per_class=1,
+    ...                            weights=[0.99], flip_y=0,
+    ...                            random_state=1)
+    >>> scaler = MinMaxScaler(feature_range=(0, 1))
+    >>> scaler.fit(X)
+    >>> Xs = scaler.transform(X)
+    >>> Xm, ym, W = init_lvq3(Xs, y)
+    >>> Xm, ym, W = init_lvq3(Xs, y, seed=0)
     """
     classes = np.unique(y)
     ly = len(y)
@@ -190,6 +203,40 @@ def train_lvq(X, y, random_seed=2024, number_epochs=100, verbose=False):
     """
     Set the input required input and train a LVQ3 model with standard default
     values
+
+    Example
+    -------
+    >>> from LVQImbalance import *
+    >>> from sklearn.datasets import make_classification
+    >>> from sklearn.preprocessing import MinMaxScaler
+    >>> from sklearn.model_selection import StratifiedKFold
+    >>> import matplotlib.pyplot as plt
+    >>> from LVQImbalance import *
+    >>> X, y = make_classification(n_samples=10000, n_features=2,
+    ...                            n_redundant=0,
+    ...                            n_clusters_per_class=1,
+    ...                            weights=[0.99], flip_y=0,
+    ...                            random_state=1)
+    >>> scaler = MinMaxScaler(feature_range=(0, 1))
+    >>> scaler.fit(X)
+    >>> Xs = scaler.transform(X)
+    >>> # train from 50 splits
+    >>> skf = StratifiedKFold(n_splits=50)
+    >>> epochs = 2
+    >>> W0, W1 = [], []
+    >>> for i, (train_index, test_index) in enumerate(skf.split(X, y)):
+    ...     WW = train_lvq(Xs[train_index], y[train_index],
+    ...                    random_seed=i, number_epochs=epochs)
+    ...     W = WW[0]
+    ...     W0.append(W[0])
+    ...     W1.append(W[1])
+    >>> W0 = np.array(W0)
+    >>> W1 = np.array(W1)
+    >>> plt.scatter(Xs[y==0, 0], Xs[y==0, 1], s=3, label='0')
+    >>> plt.scatter(Xs[y==1, 0], Xs[y==1, 1], s=3, label='1')
+    >>> plt.scatter(W0[:,0], W0[:,1], s=5)
+    >>> plt.scatter(W1[:,0], W1[:,1], s=5)
+    >>> plt.show()
     """
     learning_starting_rate = 0.05  # 0.2
     learning_rate_decrease = 0.95
@@ -211,7 +258,7 @@ def lvq_extra(X, y, W, hot_encoding=False):
     extra data for the training. The input are binary (one-hot encoding)
     0 or 1
 
-    The limitation is that this is an augmentation based on a 
+    The limitation is that this is an augmentation based on a
     single prototype
 
     Parameters
@@ -260,10 +307,27 @@ def lvq_extra(X, y, W, hot_encoding=False):
     >>> X_extra, y_extra = lvq_extra(Xs, y, W)
     >>> Counter(y_extra)
     >>> w_extra = y_extra == 0
-    >>> plt.scatter(X_extra[w_extra, 0], X_extra[w_extra, 1], s=3, label='0')
-    >>> plt.scatter(X_extra[~w_extra, 0], X_extra[~w_extra, 1], s=3, label='1')
+    >>> plt.scatter(X_extra[w_extra, 0], X_extra[w_extra, 1], s=1,
+    ...             label='0', alpha=0.5)
+    >>> plt.scatter(X_extra[~w_extra, 0], X_extra[~w_extra, 1], s=1,
+    ...             label='1', alpha=0.5)
+    >>> plt.scatter(Xs[y==0, 0], Xs[y==0, 1], s=3, label='0', alpha=0.9)
+    >>> plt.scatter(Xs[y==1, 0], Xs[y==1, 1], s=3, label='1',
+    ...             alpha=0.9, color='black')
     >>> plt.legend()
     >>> plt.show()
+    >>> # Test
+    >>> from sklearn.model_selection import cross_val_score
+    >>> from sklearn.model_selection import RepeatedStratifiedKFold
+    >>> from sklearn.tree import DecisionTreeClassifier
+    >>> # define model
+    >>> model = DecisionTreeClassifier()
+    >>> # evaluate
+    >>> cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+    >>> scores = cross_val_score(model, X_extra, y_extra, scoring='roc_auc',
+    ...                          cv=cv, n_jobs=-1)
+    >>> print('Mean ROC AUC: %.3f' % mean(scores))
+    >>> # Mean ROC AUC: 0.992
     """
     if X.min() < 0:
         print("There are features with value < 0")
