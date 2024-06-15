@@ -209,7 +209,6 @@ def train_lvq(X, y, random_seed=2024, number_epochs=100, verbose=False):
     >>> from LVQImbalance import *
     >>> from sklearn.datasets import make_classification
     >>> from sklearn.preprocessing import MinMaxScaler
-    >>> from sklearn.model_selection import StratifiedKFold
     >>> import matplotlib.pyplot as plt
     >>> from LVQImbalance import *
     >>> X, y = make_classification(n_samples=10000, n_features=2,
@@ -445,31 +444,54 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10, seed=1):
     >>> # define model
     >>> model = DecisionTreeClassifier()
     >>> # evaluate
+    >>> cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
     >>> scores = cross_val_score(model, X_extra, y_extra, scoring='roc_auc',
     ...                          cv=cv, n_jobs=-1)
     >>> print('Mean ROC AUC: %.3f' % np.mean(scores))
     >>> # Mean ROC AUC: 0.990 with 5 prototypes, number_epochs = 10
     """
+    uX = np.unique(X)
+    hot_encoding = False
+    # check if the features are all hot-encodings
+    if len(uX) == 2:
+        if all(np.unique(X) == [0., 1.]):
+            hot_encoding = True
     ind_list = []
     split = [int(X.shape[0] / n_prototypes)] * (n_prototypes - 1)
     split.append(X.shape[0] - sum(split))
     lind = X.shape[0]
     indall = np.arange(0, lind, 1)
+    yall = y.copy()
+    count = Counter(y)
+    ly = len(y)
     rng = np.random.default_rng(seed)
-    for sp in split:
+    for i, sp in enumerate(split):
         ind = np.arange(0, lind, 1)
+        w0 = np.where(yall == 0)[0]
+        w1 = np.where(yall == 1)[0]
         mask = np.ones(len(ind), dtype=bool)
-        mask[rng.choice(ind, sp, replace=False)] = False
+        if i < n_prototypes - 1:  # stratifield choice
+            sp1 = int(np.max([1, sp * count[1] / ly]))
+            sp0 = sp - sp1
+            mask[rng.choice(ind[w0], sp0, replace=False)] = False
+            if len(w1) == 0:
+                print('Not enough entry for class 1')
+                print('Try decreasing the nunber of prototypes')
+                return None, None, None, None, None, None
+            mask[rng.choice(ind[w1], sp1, replace=False)] = False
+        else:  # last batch, use the rest of the data
+            mask[rng.choice(ind, sp, replace=False)] = False
         ind_list.append(indall[~mask])
         indall = indall[mask]
+        yall = yall[mask]
         lind -= sp
     W0, W1, Xel, yel = [], [], [], []
     for i, ind in enumerate(ind_list):
-        W = train_lvq(X[ind], y[ind], 
+        W = train_lvq(X[ind], y[ind],
                       verbose=True, number_epochs=number_epochs)
         W0.append(W[0][0])
         W1.append(W[0][1])
-        Xe, ye = lvq_extra(X[ind], y[ind], W)
+        Xe, ye = lvq_extra(X[ind], y[ind], W, hot_encoding=hot_encoding)
         if i == 0:
             X_extra = Xe.copy()
             y_extra = ye.copy()
