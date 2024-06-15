@@ -28,7 +28,9 @@
 from collections import Counter
 import numpy as np
 from imblearn.datasets import fetch_datasets
+from sklearn.base import clone
 from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import cross_validate
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
@@ -84,8 +86,10 @@ scaler = MinMaxScaler(feature_range=(0, 1))
 scaler.fit(Xp)
 Xs = scaler.transform(Xp)
 Xs[Xs > 1.0] = 1.0  # Minmax scaler may show numerical precision error
+# Split between training and test sets
 X_train, X_test, y_train, y_test = train_test_split(Xs, yp, test_size=0.2,
                                                     random_state=42)
+# Use LVQ augmentation 20 prototypes, training for 30 epochs
 Xp_extra, yp_extra, Xpel, ypel, Wp0, Wp1 = lvq_prototypes(20, X_train, y_train,
                                                           number_epochs=30)
 model = DecisionTreeClassifier()
@@ -114,9 +118,56 @@ clf.fit(X_tr, y_tr, eval_set=[(X_eval, y_eval)])
 proba_xgb = clf.predict_proba(X_test)
 print('XGBoost Average precision on the test set: %.3f' %
       average_precision_score(y_test, proba_xgb[:, 1]))
+# XGBoost Average precision on the test set: 0.877
 
 # plot the confusion matrix
 cm = confusion_matrix(y_test, np.rint(proba_xgb[:, 1]))
+disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+disp.plot()
+plt.show()
+
+
+# XGBoost cross-validation model
+def fit_and_score(estimator, X_train, X_test, y_train, y_test):
+    """Fit the estimator on the train set and score it on both sets"""
+    estimator.fit(X_train, y_train, eval_set=[(X_test, y_test)])
+
+    train_score = estimator.score(X_train, y_train)
+    test_score = estimator.score(X_test, y_test)
+
+    return estimator, train_score, test_score
+
+
+# Use Cross-validation for the training
+n_splits = 5
+cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=94)
+clf = xgb.XGBClassifier(tree_method="hist", early_stopping_rounds=5)
+
+model, tr_sc, ts_sc = [], [], []
+for train, test in cv.split(Xp_extra, yp_extra):
+    X_tr = Xp_extra[train]
+    X_eval = Xp_extra[test]
+    y_tr = yp_extra[train]
+    y_eval = yp_extra[test]
+    est, train_score, test_score = fit_and_score(
+        clone(clf), X_train, X_test, y_train, y_test)
+    model.append(est)
+    tr_sc.append(train_score)
+    ts_sc.append(test_score)
+
+proba = []
+for i, mod in enumerate(model):
+    if i == 0:
+        proba = mod.predict_proba(X_test)
+    else:
+        proba += mod.predict_proba(X_test)
+mean_proba = proba[:, 1] / n_splits
+print('Average precision on the test set: %.3f' %
+      average_precision_score(y_test, mean_proba))
+# Average precision on the test set: 0.880
+
+# plot the confusion matrix
+cm = confusion_matrix(y_test, np.rint(mean_proba))
 disp = ConfusionMatrixDisplay(confusion_matrix=cm)
 disp.plot()
 plt.show()
