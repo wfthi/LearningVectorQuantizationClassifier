@@ -303,7 +303,7 @@ def lvq_extra(X, y, W, hot_encoding=False):
     >>> plt.legend()
     >>> plt.show()
     >>> Counter(y)
-    >>> W = train_lvq(Xs, y, verbose=True)
+    >>> W = train_lvq(Xs, y, verbose=True, number_epochs=30)
     >>> X_extra, y_extra = lvq_extra(Xs, y, W)
     >>> Counter(y_extra)
     >>> w_extra = y_extra == 0
@@ -326,8 +326,8 @@ def lvq_extra(X, y, W, hot_encoding=False):
     >>> cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
     >>> scores = cross_val_score(model, X_extra, y_extra, scoring='roc_auc',
     ...                          cv=cv, n_jobs=-1)
-    >>> print('Mean ROC AUC: %.3f' % mean(scores))
-    >>> # Mean ROC AUC: 0.992
+    >>> print('Mean ROC AUC: %.3f' % np.mean(scores))
+    >>> #  Mean ROC AUC: 0.990  # 30 epochs
     """
     if X.min() < 0:
         print("There are features with value < 0")
@@ -363,3 +363,120 @@ def lvq_extra(X, y, W, hot_encoding=False):
     X_extra = np.vstack((X_pos_extra, X))
     y_extra = np.append(np.full(X_pos_extra.shape[0], 1), y)
     return X_extra, y_extra
+
+
+def lvq_prototypes(n_prototypes, X, y, number_epochs=10, seed=1):
+    """
+    Balance the binary classes with multiple prototypes.
+
+    The code will split the input into n_prototypes separate batches.
+    Then it will train for each batch data for number_epochs for determine
+    the prototypes.
+
+    The code then will run the extra data routine lvq_extra for each prototype
+    pairs to balance the classes.
+
+    Parameters
+    ----------
+    n_prototypes : int
+        the number of prototype per class.
+        n_prototypes = 2 means 2 for each class in y
+
+    X : array-like
+        original input data set scaled to values beween 0 and 1
+
+    y : array-like
+        original input classes
+
+    number_epochs : int, optional, default = 10
+        the number of epochs used for the lvq training
+
+    seed : int, optional, default = 1
+        random generator seed value
+
+    Returns
+    -------
+    Xel : list
+        list of original + extra datasets
+        one entry per prototype
+
+    yel : list
+        list of original + extra corresponding classes
+
+    W0: list
+        the weights for the class 0
+
+    W1 : list
+        the weights for the class 1
+
+    Example
+    -------
+    >>> import matplotlib.pyplot as plt
+    >>> from sklearn.datasets import make_classification
+    >>> from sklearn.preprocessing import MinMaxScaler
+    >>> from LVQImbalance import *
+    >>> X, y = make_classification(n_samples=10000, n_features=2,
+    ...                            n_redundant=0,
+    ...                            n_clusters_per_class=1,
+    ...                            weights=[0.99], flip_y=0,
+    ...                            random_state=1)
+    >>> scaler = MinMaxScaler(feature_range=(0, 1))
+    >>> scaler.fit(X)
+    >>> Xs = scaler.transform(X)
+    >>> X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(10, Xs, y)
+    >>> for i, (Xe, ye) in enumerate(zip(Xel, yel)):
+    ...     pos = ye == 0
+    ...     plt.scatter(Xe[pos, 0], Xe[pos, 1], s=1, 
+    ...                 label='extra 0', alpha=0.5)
+    ...     plt.scatter(Xe[~pos, 0], Xe[~pos, 1], s=1, 
+    ...                 label='extra 1', alpha=0.5)
+    >>> plt.scatter(Xs[y==0, 0], Xs[y==0, 1], s=3, alpha=0.5,
+    ...             label='Original 0')
+    >>> plt.scatter(Xs[y==1, 0], Xs[y==1, 1], s=3, label='Original 1',
+    ...             alpha=0.5, color='black')
+    >>> plt.scatter(W0[0], W0[1], label='Weight 0', marker='*')
+    >>> plt.scatter(W1[0], W1[1], label='Weight 1', marker='*')
+    >>> plt.legend()
+    >>> plt.show()
+    >>> # Test
+    >>> from sklearn.model_selection import cross_val_score
+    >>> from sklearn.model_selection import RepeatedStratifiedKFold
+    >>> from sklearn.tree import DecisionTreeClassifier
+    >>> # define model
+    >>> model = DecisionTreeClassifier()
+    >>> # evaluate
+    >>> scores = cross_val_score(model, X_extra, y_extra, scoring='roc_auc',
+    ...                          cv=cv, n_jobs=-1)
+    >>> print('Mean ROC AUC: %.3f' % np.mean(scores))
+    >>> # Mean ROC AUC: 0.990 with 5 prototypes, number_epochs = 10
+    """
+    ind_list = []
+    split = [int(X.shape[0] / n_prototypes)] * (n_prototypes - 1)
+    split.append(X.shape[0] - sum(split))
+    lind = X.shape[0]
+    indall = np.arange(0, lind, 1)
+    rng = np.random.default_rng(seed)
+    for sp in split:
+        ind = np.arange(0, lind, 1)
+        mask = np.ones(len(ind), dtype=bool)
+        mask[rng.choice(ind, sp, replace=False)] = False
+        ind_list.append(indall[~mask])
+        indall = indall[mask]
+        lind -= sp
+    W0, W1, Xel, yel = [], [], [], []
+    for i, ind in enumerate(ind_list):
+        W = train_lvq(X[ind], y[ind], 
+                      verbose=True, number_epochs=number_epochs)
+        W0.append(W[0][0])
+        W1.append(W[0][1])
+        Xe, ye = lvq_extra(X[ind], y[ind], W)
+        if i == 0:
+            X_extra = Xe.copy()
+            y_extra = ye.copy()
+        X_extra = np.vstack((X_extra, Xe))
+        y_extra = np.concatenate((y_extra, ye))
+        Xel.append(Xe)
+        yel.append(ye)
+    W0 = np.array(W0).T
+    W1 = np.array(W1).T
+    return X_extra, y_extra, Xel, yel, W0, W1
