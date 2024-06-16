@@ -77,6 +77,8 @@ for mod in scores['estimator']:
 mean_proba = np.mean(proba, 0)
 print('Average precision on the test set: %.3f' %
       average_precision_score(y_test, mean_proba[:, 1]))
+# Mean average precision training set: 0.993
+# Average precision on the test set: 0.330
 
 # Example 2 protein homology prediction problem
 protein = fetch_datasets()['protein_homo']
@@ -100,13 +102,14 @@ scores = cross_validate(model, Xp_extra, yp_extra, scoring='average_precision',
                         cv=cv, n_jobs=-1, return_estimator=True)
 print('Mean average precision training set: %.3f'
       % np.mean(scores['test_score']))
+# Mean average precision training set: 0.996
 proba = []
 for mod in scores['estimator']:
     proba.append(mod.predict_proba(X_test))
 mean_proba = np.mean(proba, 0)
 print('Average precision on the test set: %.3f' %
       average_precision_score(y_test, mean_proba[:, 1]))
-# Average precision on the test set: 0.794 with DecisionTree
+# Average precision on the test set: 0.821 with DecisionTree
 
 # Use XGBoost classifier with early stopping
 # Stratified train/evaluation split
@@ -124,7 +127,7 @@ print('XGBoost Average precision on the test set: %.3f' %
 # XGBoost Average precision on the test set: 0.86 - 0.9
 
 # plot the confusion matrix
-cm = confusion_matrix(y_test, np.rint(proba_xgb[:, 1]))
+cm = confusion_matrix(y_test, (proba_xgb[:, 1] > 0.40))
 disp = ConfusionMatrixDisplay(confusion_matrix=cm)
 disp.plot()
 plt.show()
@@ -187,9 +190,10 @@ Xas = scaler.transform(Xa)
 X_train, X_test, y_train, y_test = train_test_split(Xas, ya, test_size=0.2,
                                                     stratify=ya,
                                                     random_state=2421)
-X_extra, y_extra, Xel, yel, Wp0, Wp1 = lvq_prototypes(3, X_train, y_train,
-                                                      verbose=True,
-                                                      number_epochs=50)
+X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(1, X_train, y_train,
+                                                    data_boundary=False,
+                                                    verbose=True,
+                                                    number_epochs=50)
 
 # Check the data augmentation
 model = RandomForestClassifier()
