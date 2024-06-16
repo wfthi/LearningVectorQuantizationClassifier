@@ -153,7 +153,6 @@ def lvq3_train(X, y, W, a, b, max_ep, min_a, e, verbose=False):
             dr = float(d[min_2])
             if c[min_1] == y[i] and c[min_1] != r[min_2]:
                 W[min_1] = W[min_1] + a * (x - W[min_1])
-
             elif c[min_1] != r[min_2] and y[i] == r[min_2]:
                 if dc != 0 and dr != 0:
                     if min((dc / dr), (dr / dc)) > (1. - e) / (1. + e):
@@ -248,7 +247,7 @@ def train_lvq(X, y, random_seed=2024, number_epochs=100, verbose=False):
     return W
 
 
-def lvq_extra(X, y, W, hot_encoding=False, verbose=False):
+def lvq_extra(X, y, W, hot_encoding=False, verbose=False, data_boundary=True):
     """
     Balance the classes from an imbalance input set
     (e.g. input with outliers).
@@ -276,6 +275,11 @@ def lvq_extra(X, y, W, hot_encoding=False, verbose=False):
 
     verbose : boolean, optional, default=False
         True to have screen logging
+
+    data_boundary : boolean, optional, default=True
+        if True, bound the augmented data within the range of the input
+        data. It may be worth to extend beyond the boundary values to
+        make the learning more general.
 
     Return
     ------
@@ -352,30 +356,50 @@ def lvq_extra(X, y, W, hot_encoding=False, verbose=False):
         minority = 1
     if verbose:
         print('Minority class', minority)
+    wpos = y == minority
+    Xmin = X[wpos, :].min(0)
+    Xmax = X[wpos, :].max(0)
     X_pos_extra = np.empty((nb_extra, X.shape[1]))
     count = Counter(y)
+    if verbose:
+        print('Majority:', count[majority], 'Minority:', count[minority])
     ratio = int(count[majority] / count[minority])
+    max_fail = 100
+    fail = 0
     if hot_encoding:
         if verbose:
             print('Hot encoding')
         rnd = np.random.random((nb_extra, X.shape[1]))
-        X_pos_extra = (rnd < trh) * 1  # augmentated value 0 or 1
+        if data_boundary:
+            rnd = rnd * (Xmax - Xmin) + Xmin
+        X_pos_extra = (rnd < trh) * 1  # augmented value 0 or 1
     else:
         imin, imax = 0, 0
-        ratio_fac = 100
+        ratio_fac = 10
         while imax < nb_extra:
-            nb_sample = ratio * nb_extra
+            nb_sample = int(ratio * nb_extra)
+            if verbose:
+                print('nb_extra:', nb_extra, 'ratio:', ratio,
+                      'nb_sample:', nb_sample)
             rnd = np.random.random((nb_sample, X.shape[1]))
+            if data_boundary:
+                rnd = rnd * (Xmax - Xmin) + Xmin
             dist = np.array([np.sum((rnd - WW)**2, 1) for WW in W0])
+            # only criterion is that the distance is closer to the minority
+            # prototype
             w_new = np.argsort(dist, 0)[0] == minority
             nb_new = np.count_nonzero(w_new)
-            if nb_new == 0:
-                ratio = ratio * ratio_fac
-            else:
-                ratio = np.max([ratio, int(nb_extra / nb_new)])
             if verbose:
-                print('imax / nb_extra:', imax, '/', nb_extra,
-                      ', nb new data:', nb_new, ', nb sample:', nb_sample)
+                print('nb_new:', nb_new)
+            if nb_new == 0:
+                if verbose:
+                    print('No new data from all the random draws')
+                ratio = ratio * ratio_fac
+                fail += 1
+                if fail > max_fail: 
+                    print('Augmentation failed')
+                    return None, None
+            ratio = np.min([ratio, 1000])
             nb_more = np.min([nb_extra - imax, nb_new])
             imin = imax
             imax += nb_more
@@ -387,7 +411,7 @@ def lvq_extra(X, y, W, hot_encoding=False, verbose=False):
 
 
 def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
-                   seed=1, verbose=False):
+                   seed=1, verbose=False, data_boundary=True):
     """
     Balance the binary classes with multiple prototypes.
 
@@ -418,6 +442,9 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
 
     verbose : boolean, optional, default=False
         True to have screen logging
+
+    data_boundary : boolean, optional, default=True
+        if True, bound the augmented data within the range of the input
 
     Returns
     -------
@@ -518,11 +545,14 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
         print('Training batch ', i + 1, '/', n_prototypes)
         W = train_lvq(X[ind], y[ind],
                       verbose=True, number_epochs=number_epochs)
-        W0.append(W[0][0])
+        W0.append(W[0][0])  # class 0
         W1.append(W[0][1])
         print('... augment the data')
         Xe, ye = lvq_extra(X[ind], y[ind], W, verbose=verbose,
+                           data_boundary=data_boundary,
                            hot_encoding=hot_encoding)
+        if Xe is None and ye is None:
+            return None, None, None, None, W0, W1
         if i == 0:
             X_extra = Xe.copy()
             y_extra = ye.copy()
