@@ -248,7 +248,7 @@ def train_lvq(X, y, random_seed=2024, number_epochs=100, verbose=False):
     return W
 
 
-def lvq_extra(X, y, W, hot_encoding=False):
+def lvq_extra(X, y, W, hot_encoding=False, verbose=False):
     """
     Balance the classes from an imbalance input set
     (e.g. input with outliers).
@@ -273,6 +273,9 @@ def lvq_extra(X, y, W, hot_encoding=False):
 
     hot_encoding : boolean, optional, default=False
         True if all the features are only 0 or 1 (hot-encoding)
+
+    verbose : boolean, optional, default=False
+        True to have screen logging
 
     Return
     ------
@@ -338,22 +341,41 @@ def lvq_extra(X, y, W, hot_encoding=False):
     trh = W0[1]
     count_train = Counter(y)
     nb_extra = (count_train[0] - count_train[1])
+    if verbose:
+        print('Require', nb_extra, 'data')
     if nb_extra < 0:
+        majority = 1
         minority = 0
         nb_extra = -nb_extra
     else:
+        majority = 0
         minority = 1
+    if verbose:
+        print('Minority class', minority)
     X_pos_extra = np.empty((nb_extra, X.shape[1]))
+    count = Counter(y)
+    ratio = int(count[majority] / count[minority])
     if hot_encoding:
+        if verbose:
+            print('Hot encoding')
         rnd = np.random.random((nb_extra, X.shape[1]))
         X_pos_extra = (rnd < trh) * 1  # augmentated value 0 or 1
     else:
         imin, imax = 0, 0
+        ratio_fac = 100
         while imax < nb_extra:
-            rnd = np.random.random((nb_extra, X.shape[1]))
+            nb_sample = ratio * nb_extra
+            rnd = np.random.random((nb_sample, X.shape[1]))
             dist = np.array([np.sum((rnd - WW)**2, 1) for WW in W0])
             w_new = np.argsort(dist, 0)[0] == minority
             nb_new = np.count_nonzero(w_new)
+            if nb_new == 0:
+                ratio = ratio * ratio_fac
+            else:
+                ratio = np.max([ratio, int(nb_extra / nb_new)])
+            if verbose:
+                print('imax / nb_extra:', imax, '/', nb_extra,
+                      ', nb new data:', nb_new, ', nb sample:', nb_sample)
             nb_more = np.min([nb_extra - imax, nb_new])
             imin = imax
             imax += nb_more
@@ -364,7 +386,8 @@ def lvq_extra(X, y, W, hot_encoding=False):
     return X_extra, y_extra
 
 
-def lvq_prototypes(n_prototypes, X, y, number_epochs=10, seed=1):
+def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
+                   seed=1, verbose=False):
     """
     Balance the binary classes with multiple prototypes.
 
@@ -392,6 +415,9 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10, seed=1):
 
     seed : int, optional, default = 1
         random generator seed value
+
+    verbose : boolean, optional, default=False
+        True to have screen logging
 
     Returns
     -------
@@ -425,9 +451,9 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10, seed=1):
     >>> X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(10, Xs, y)
     >>> for i, (Xe, ye) in enumerate(zip(Xel, yel)):
     ...     pos = ye == 0
-    ...     plt.scatter(Xe[pos, 0], Xe[pos, 1], s=1, 
+    ...     plt.scatter(Xe[pos, 0], Xe[pos, 1], s=1,
     ...                 label='extra 0', alpha=0.5)
-    ...     plt.scatter(Xe[~pos, 0], Xe[~pos, 1], s=1, 
+    ...     plt.scatter(Xe[~pos, 0], Xe[~pos, 1], s=1,
     ...                 label='extra 1', alpha=0.5)
     >>> plt.scatter(Xs[y==0, 0], Xs[y==0, 1], s=3, alpha=0.5,
     ...             label='Original 0')
@@ -465,7 +491,9 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10, seed=1):
     count = Counter(y)
     ly = len(y)
     rng = np.random.default_rng(seed)
+    print('Split the input dataset into batches')
     for i, sp in enumerate(split):
+        print('Batch ', i + 1, '/', n_prototypes)
         ind = np.arange(0, lind, 1)
         w0 = np.where(yall == 0)[0]
         w1 = np.where(yall == 1)[0]
@@ -487,11 +515,14 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10, seed=1):
         lind -= sp
     W0, W1, Xel, yel = [], [], [], []
     for i, ind in enumerate(ind_list):
+        print('Training batch ', i + 1, '/', n_prototypes)
         W = train_lvq(X[ind], y[ind],
                       verbose=True, number_epochs=number_epochs)
         W0.append(W[0][0])
         W1.append(W[0][1])
-        Xe, ye = lvq_extra(X[ind], y[ind], W, hot_encoding=hot_encoding)
+        print('... augment the data')
+        Xe, ye = lvq_extra(X[ind], y[ind], W, verbose=verbose,
+                           hot_encoding=hot_encoding)
         if i == 0:
             X_extra = Xe.copy()
             y_extra = ye.copy()
