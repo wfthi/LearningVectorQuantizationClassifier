@@ -257,7 +257,9 @@ def lvq_extra(X, y, W, hot_encoding=False, verbose=False, data_boundary=True):
     0 or 1
 
     The limitation is that this is an augmentation based on a
-    single prototype
+    single prototype. The data_boundary = True is needed if one
+    wishes to to asymptotically regenerate the distribution of the
+    minority class.
 
     Parameters
     ----------
@@ -278,7 +280,9 @@ def lvq_extra(X, y, W, hot_encoding=False, verbose=False, data_boundary=True):
 
     data_boundary : boolean, optional, default=True
         if True, bound the augmented data within the range of the input
-        data. It may be worth to extend beyond the boundary values to
+        data, i.e. the newly generated dataset is within the convex hull
+        of the minority train data.
+        It may be worth to extend beyond the boundary values to
         make the learning more general.
 
     Return
@@ -422,6 +426,9 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
     The code then will run the extra data routine lvq_extra for each prototype
     pairs to balance the classes.
 
+    The generated data will be within the convex hull of the minority data
+    if the flag data_boundary is set to True.
+
     Parameters
     ----------
     n_prototypes : int
@@ -466,6 +473,7 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
     >>> import matplotlib.pyplot as plt
     >>> from sklearn.datasets import make_classification
     >>> from sklearn.preprocessing import MinMaxScaler
+    >>> from imblearn.over_sampling import SMOTE
     >>> from LVQImbalance import *
     >>> X, y = make_classification(n_samples=10000, n_features=2,
     ...                            n_redundant=0,
@@ -475,21 +483,41 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
     >>> scaler = MinMaxScaler(feature_range=(0, 1))
     >>> scaler.fit(X)
     >>> Xs = scaler.transform(X)
-    >>> X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(10, Xs, y)
+    >>> X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(10, Xs, y,
+    ...                                                     data_boundary=True)
+    >>> # SMOTE
+    >>> sm = SMOTE(random_state=42)
+    >>> X_res, y_res = sm.fit_resample(Xs, y)
     >>> for i, (Xe, ye) in enumerate(zip(Xel, yel)):
     ...     pos = ye == 0
-    ...     plt.scatter(Xe[pos, 0], Xe[pos, 1], s=1,
-    ...                 label='extra 0', alpha=0.5)
-    ...     plt.scatter(Xe[~pos, 0], Xe[~pos, 1], s=1,
-    ...                 label='extra 1', alpha=0.5)
-    >>> plt.scatter(Xs[y==0, 0], Xs[y==0, 1], s=3, alpha=0.5,
-    ...             label='Original 0')
-    >>> plt.scatter(Xs[y==1, 0], Xs[y==1, 1], s=3, label='Original 1',
+    ...     if i == 0:
+    ...         plt.scatter(Xe[~pos, 0], Xe[~pos, 1], s=5,
+    ...                    label='LVQ', color='red', alpha=0.5)
+    ...     else:
+    ...         plt.scatter(Xe[~pos, 0], Xe[~pos, 1], s=5,
+    ...                     color='red', alpha=0.5)
+    >>> plt.scatter(Xs[y==0, 0], Xs[y==0, 1], s=5, alpha=0.5,
+    ...             label='Original 0', color='blue')
+    >>> plt.scatter(Xs[y==1, 0], Xs[y==1, 1], s=5, label='Original 1',
     ...             alpha=0.5, color='black')
     >>> plt.scatter(W0[0], W0[1], label='Weight 0', marker='*')
     >>> plt.scatter(W1[0], W1[1], label='Weight 1', marker='*')
+    >>> plt.xlabel('Feature 1')
+    >>> plt.ylabel('Feature 2')
     >>> plt.legend()
     >>> plt.show()
+    >>> # Plot SMOTE resampling
+    >>> plt.scatter(X_res[y_res ==1, 0], X_res[y_res ==1, 1],
+    ...             label='SMOTE 1', color='red', marker='*', s=1)
+    >>> plt.scatter(Xs[y==0, 0], Xs[y==0, 1], s=5, alpha=0.5,
+    ...             label='Original 0')
+    >>> plt.scatter(Xs[y==1, 0], Xs[y==1, 1], s=5, label='Original 1',
+    ...             alpha=0.5, color='black')
+    >>> plt.xlabel('Feature 1')
+    >>> plt.ylabel('Feature 2')
+    >>> plt.legend()
+    >>> plt.show()
+
     >>> # Test
     >>> from sklearn.model_selection import cross_val_score
     >>> from sklearn.model_selection import RepeatedStratifiedKFold
@@ -501,7 +529,7 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
     >>> scores = cross_val_score(model, X_extra, y_extra, scoring='roc_auc',
     ...                          cv=cv, n_jobs=-1)
     >>> print('Mean ROC AUC: %.3f' % np.mean(scores))
-    >>> # Mean ROC AUC: 0.990 with 5 prototypes, number_epochs = 10
+    >>> # Mean ROC AUC: 0.990 with 5-10 prototypes, number_epochs = 10
     """
     uX = np.unique(X)
     hot_encoding = False
@@ -548,6 +576,8 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
         W0.append(W[0][0])  # class 0
         W1.append(W[0][1])
         print('... augment the data')
+        if data_boundary:
+            print('data_boundary:', data_boundary)
         Xe, ye = lvq_extra(X[ind], y[ind], W, verbose=verbose,
                            data_boundary=data_boundary,
                            hot_encoding=hot_encoding)
