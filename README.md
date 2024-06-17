@@ -10,11 +10,11 @@ Two training methods are available. By default the standard LVQ training is used
 
 A single-prototype LVQ method is provided to augment minority class data in imblanced datasets.
 
-Reference
+#### Reference
 
-#### T. Kohonen. Self-Organizing Maps. Springer, Berlin, 1997.
+T. Kohonen. Self-Organizing Maps. Springer, Berlin, 1997.
 
-#### Martinez, T., Berkovich, G. and Schulten, K.J.: Neural Gas Network for Vector Quantization and its Application to Time-Series Prediction. In: IEEE Transactions on Neural Networks, 4, 4, 558- 569 (1993)
+Martinez, T., Berkovich, G. and Schulten, K.J.: Neural Gas Network for Vector Quantization and its Application to Time-Series Prediction. In: IEEE Transactions on Neural Networks, 4, 4, 558- 569 (1993)
 
 Here is a comparison of the LVQ method as a classifier with other methods.
 
