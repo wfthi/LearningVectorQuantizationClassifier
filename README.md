@@ -12,9 +12,9 @@ A single-prototype LVQ method is provided to augment minority class data in imbl
 
 Reference
 
-T. Kohonen. Self-Organizing Maps. Springer, Berlin, 1997.
+#### T. Kohonen. Self-Organizing Maps. Springer, Berlin, 1997.
 
-Martinez, T., Berkovich, G. and Schulten, K.J.: Neural Gas Network for Vector Quantization and its Application to Time-Series Prediction. In: IEEE Transactions on Neural Networks, 4, 4, 558- 569 (1993)
+#### Martinez, T., Berkovich, G. and Schulten, K.J.: Neural Gas Network for Vector Quantization and its Application to Time-Series Prediction. In: IEEE Transactions on Neural Networks, 4, 4, 558- 569 (1993)
 
 Here is a comparison of the LVQ method as a classifier with other methods.
 
@@ -27,4 +27,8 @@ For binary classification, the occurance of the often interesting class is very 
 ![smote_resampling](https://github.com/wfthi/LearningVectorQuantizationClassifier/assets/94956037/18303f9c-dfeb-4626-bbae-97ca6e6743e9)
 
 ![LVQresampling](https://github.com/wfthi/LearningVectorQuantizationClassifier/assets/94956037/92ae9dfa-38c5-477f-a2eb-aff1e0e22bd7)
+
+### Reference
+
+N. V. Chawla, K. W. Bowyer, L. O.Hall, W. P. Kegelmeyer, “SMOTE: synthetic minority over-sampling technique,” Journal of artificial intelligence research, 321-357, 2002.
 
