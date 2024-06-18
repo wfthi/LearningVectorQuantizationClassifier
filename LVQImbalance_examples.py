@@ -40,8 +40,25 @@ from sklearn.metrics import average_precision_score
 import xgboost as xgb
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
+from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
 from LVQImbalance import lvq_prototypes
 
+
+# XGBoost cross-validation model
+def fit_and_score(estimator, X_train, X_evaluation, y_train, y_evaluation):
+    """Fit the estimator on the train set and score it on both sets"""
+    estimator.fit(X_train, y_train, eval_set=[(X_evaluation, y_evaluation)])
+    ypred = estimator.predict_proba(X_train)
+    train_score = average_precision_score(y_train, ypred[:, 1])
+    ypred = estimator.predict_proba(X_evaluation)
+    evaluation_score = average_precision_score(y_evaluation, ypred[:, 1])
+
+    return estimator, train_score, evaluation_score
+
+
+# ----------------------------------------------------------------
 # Example 1: Solar Flare prediction
 solar_flare = fetch_datasets()['solar_flare_m0']
 solar_flare.data.shape
@@ -62,8 +79,15 @@ print('Mean average precision training set: %.3f'
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1,
                                                     stratify=y,
                                                     random_state=42)
-X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(5, X_train, y_train,
+# Combining SMOTE and LVQ augmentation
+sm = SMOTE(sampling_strategy=0.5)
+X_res, y_res = sm.fit_resample(X_train, y_train)
+X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(5, X_res, y_res,
+                                                    sampling_strategy=1,
+                                                    hot_encoding=False,
                                                     number_epochs=30)
+dprototypes = np.sum((W0 - W1)**2, 0)  # distance between prototypes
+
 model = RandomForestClassifier()
 # Repeated cross-validation training
 cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
@@ -78,9 +102,48 @@ mean_proba = np.mean(proba, 0)
 print('Average precision on the test set: %.3f' %
       average_precision_score(y_test, mean_proba[:, 1]))
 # Mean average precision training set: 0.993
-# Average precision on the test set: 0.330
+# Average precision on the test set: 0.25-0.31
 
+# use SMOTE only
+sm = SMOTE(sampling_strategy=1.0)
+X_extra, y_extra = sm.fit_resample(X_train, y_train)
+cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+scores = cross_validate(model, X_extra, y_extra, scoring='average_precision',
+                        cv=cv, n_jobs=-1, return_estimator=True)
+print('Mean average precision training set: %.3f' %
+      np.mean(scores['test_score']))
+proba = []
+for mod in scores['estimator']:
+    proba.append(mod.predict_proba(X_test))
+mean_proba = np.mean(proba, 0)
+print('Average precision on the test set: %.3f' %
+      average_precision_score(y_test, mean_proba[:, 1]))
+# Mean average precision training set: 0.988
+# Average precision on the test set: 0.248
+
+# use SMOTE & RandomUnderSampler
+over = SMOTE(sampling_strategy=0.5)
+under = RandomUnderSampler(sampling_strategy=1.0)
+steps = [('o', over), ('u', under)]
+pipeline = Pipeline(steps=steps)
+X_extra, y_extra = pipeline.fit_resample(X_train, y_train)
+cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+scores = cross_validate(model, X_extra, y_extra, scoring='average_precision',
+                        cv=cv, n_jobs=-1, return_estimator=True)
+print('Mean average precision training set: %.3f' %
+      np.mean(scores['test_score']))
+proba = []
+for mod in scores['estimator']:
+    proba.append(mod.predict_proba(X_test))
+mean_proba = np.mean(proba, 0)
+print('Average precision on the test set: %.3f' %
+      average_precision_score(y_test, mean_proba[:, 1]))
+# Mean average precision training set: 0.971
+# Average precision on the test set: 0.21-0.23
+
+# ----------------------------------------------------------------
 # Example 2 protein homology prediction problem
+# Here both SMOTE + RandomUndersampling and LVQ work well
 protein = fetch_datasets()['protein_homo']
 Xp = protein.data
 yp = protein.target
@@ -120,7 +183,8 @@ X_tr, X_eval, y_tr, y_eval = train_test_split(Xp_extra, yp_extra,
                                               stratify=yp_extra,
                                               random_state=94)
 # Use "hist" for constructing the trees, with early stopping enabled.
-clf = xgb.XGBClassifier(tree_method="hist", early_stopping_rounds=5)
+clf = xgb.XGBClassifier(tree_method="hist", eval_metric='aucpr',
+                        early_stopping_rounds=5)
 # Fit the model, test sets are used for early stopping.
 clf.fit(X_tr, y_tr, eval_set=[(X_eval, y_eval)])
 proba_xgb = clf.predict_proba(X_test)
@@ -135,25 +199,13 @@ disp.plot()
 plt.show()
 
 
-# XGBoost cross-validation model
-def fit_and_score(estimator, X_train, X_evaluation, y_train, y_evaluation):
-    """Fit the estimator on the train set and score it on both sets"""
-    estimator.fit(X_train, y_train, eval_set=[(X_evaluation, y_evaluation)],
-                  eval_metric='aucpr')
-    ypred = estimator.predict_proba(X_train)
-    train_score = average_precision_score(y_train, ypred[:, 1])
-    ypred = estimator.predict_proba(X_evaluation)
-    evaluation_score = average_precision_score(y_evaluation, ypred[:, 1])
-
-    return estimator, train_score, evaluation_score
-
-
 # Use Cross-validation for the training
 
 # Augmentation OUTISDE the cross-validation
 n_splits = 5
 cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=94)
-clf = xgb.XGBClassifier(tree_method="hist", early_stopping_rounds=5)
+clf = xgb.XGBClassifier(tree_method="hist", eval_metric='aucpr',
+                        early_stopping_rounds=5)
 
 model, tr_sc, ts_sc = [], [], []
 for train, test in cv.split(Xp_extra, yp_extra):
@@ -191,7 +243,8 @@ plt.show()
 # Augmentation INSIDE the cross-validation
 n_splits = 5
 cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=94)
-clf = xgb.XGBClassifier(tree_method="hist", early_stopping_rounds=5)
+clf = xgb.XGBClassifier(tree_method="hist", eval_metric='aucpr',
+                        early_stopping_rounds=5)
 
 model, tr_sc, ts_sc = [], [], []
 for train, evaluation in cv.split(X_train, y_train):
@@ -230,7 +283,54 @@ disp = ConfusionMatrixDisplay(confusion_matrix=cm)
 disp.plot()
 plt.show()
 
+# Use SMOTE & Random undersampling
+# define pipeline
+over = SMOTE(sampling_strategy=0.1)
+under = RandomUnderSampler(sampling_strategy=0.5)
+steps = [('o', over), ('u', under)]
+pipeline = Pipeline(steps=steps)
 
+n_splits = 5
+cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=94)
+clf = xgb.XGBClassifier(tree_method="hist", eval_metric='aucpr',
+                        early_stopping_rounds=5)
+
+model, tr_sc, ts_sc = [], [], []
+for train, evaluation in cv.split(X_train, y_train):
+    X_tr = X_train[train]
+    X_eval = X_train[evaluation]
+    y_tr = y_train[train]
+    y_eval = y_train[evaluation]
+    # augmentation inside the cross-validation loop
+    Xp_extra, yp_extra = pipeline.fit_resample(X_tr, y_tr)
+    est, train_score, evaluation_score = fit_and_score(
+        clone(clf), Xp_extra, X_eval, yp_extra, y_eval)
+    ypred = est.predict_proba(X_test)
+    print('train score: ', train_score,
+          'evaluation score:,', evaluation_score,
+          'test score:', average_precision_score(y_test, ypred[:, 1]))
+    model.append(est)
+    tr_sc.append(train_score)
+    ts_sc.append(evaluation_score)
+
+proba = []
+for i, mod in enumerate(model):
+    if i == 0:
+        proba = mod.predict_proba(X_test)
+    else:
+        proba += mod.predict_proba(X_test)
+mean_proba = proba[:, 1] / n_splits
+print('Average precision on the test set: %.3f' %
+      average_precision_score(y_test, mean_proba))
+# Average precision on the test set: 0.926
+
+# plot the confusion matrix
+cm = confusion_matrix(y_test, np.rint(mean_proba))
+disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+disp.plot()
+plt.show()
+
+# ----------------------------------------------------------------
 # Example 3 Abalone, a 130/1 ratio with only 4177 data
 abalone = fetch_datasets()['abalone_19']
 Xa = abalone.data
@@ -242,10 +342,15 @@ Xas = scaler.transform(Xa)
 X_train, X_test, y_train, y_test = train_test_split(Xas, ya, test_size=0.2,
                                                     stratify=ya,
                                                     random_state=2421)
-X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(1, X_train, y_train,
+sm = SMOTE(sampling_strategy=0.1)
+X_res, y_res = sm.fit_resample(X_train, y_train)
+X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(3, X_res, y_res,
                                                     data_boundary=False,
                                                     verbose=True,
-                                                    number_epochs=50)
+                                                    sampling_strategy=0.5,
+                                                    number_epochs=10)
+rus = RandomUnderSampler(sampling_strategy=1.0)
+X_extra, y_extra = rus.fit_resample(X_extra, y_extra)
 
 # Check the data augmentation
 model = RandomForestClassifier()
@@ -262,7 +367,7 @@ for mod in scores['estimator']:
 mean_proba = np.mean(proba, 0)
 print('Average precision on the test set: %.3f' %
       average_precision_score(y_test, mean_proba[:, 1]))
-# Average precision on the test set: 0.050
+# Average precision on the test set: 0.080
 # plot the confusion matrix
 cm = confusion_matrix(y_test, np.rint(mean_proba[:, 1]))
 disp = ConfusionMatrixDisplay(confusion_matrix=cm)
@@ -276,10 +381,11 @@ X_tr, X_eval, y_tr, y_eval = train_test_split(X_extra, y_extra,
                                               random_state=94)
 
 # Use "hist" for constructing the trees, with early stopping enabled.
-clf = xgb.XGBClassifier(tree_method="hist", early_stopping_rounds=1)
+clf = xgb.XGBClassifier(tree_method="hist", eval_metric='aucpr',
+                        early_stopping_rounds=1)
 # Fit the model, test sets are used for early stopping.
 clf.fit(X_tr, y_tr, eval_set=[(X_eval, y_eval)])
 proba_xgb = clf.predict_proba(X_test)
 print('XGBoost Average precision on the test set: %.3f' %
       average_precision_score(y_test, proba_xgb[:, 1]))
-# XGBoost Average precision on the test set: 0.020
+# XGBoost Average precision on the test set: 0.082
