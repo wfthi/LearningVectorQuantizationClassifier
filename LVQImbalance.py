@@ -250,7 +250,7 @@ def train_lvq(X, y, random_seed=2024, number_epochs=100, verbose=False):
 
 
 def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
-              seed=1,
+              seed=1, append=True,
               hot_encoding=False, verbose=False, data_boundary=True):
     """
     Balance the classes from an imbalance input set
@@ -275,6 +275,9 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
 
     W : array-like
         LVQ-trained prototype for the minority class
+
+    append : boolean, optional, default=True
+        append the augmented data to the input
 
     seed: int, optional, default=1
         random generator seed
@@ -403,8 +406,12 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
         if data_boundary:
             rnd = rnd * (Xmax - Xmin) + Xmin
         X_pos_extra = (rnd < W[0][1]) * 1  # augmented value 0 or 1
-        X_extra = np.vstack((X_pos_extra, X))
-        y_extra = np.append(np.full(X_pos_extra.shape[0], 1), y)
+        if append:
+            X_extra = np.vstack((X_pos_extra, X))
+            y_extra = np.append(np.full(X_pos_extra.shape[0], 1), y)
+        else:
+            X_extra = X_pos_extra
+            y_extra = np.full(X_pos_extra.shape[0], 1)
         return X_extra, y_extra
 
     while imax < nb_extra:
