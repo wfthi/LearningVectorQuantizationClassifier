@@ -37,6 +37,7 @@ dataset. Then use the prototype to generate data of the minority class
 from collections import Counter
 import numpy as np
 from sklearn.metrics import average_precision_score
+from sklearn.metrics import cohen_kappa_score
 
 
 def init_lvq3(X, y, seed=2024):
@@ -249,6 +250,7 @@ def train_lvq(X, y, random_seed=2024, number_epochs=100, verbose=False):
 
 
 def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
+              seed=1,
               hot_encoding=False, verbose=False, data_boundary=True):
     """
     Balance the classes from an imbalance input set
@@ -273,6 +275,9 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
 
     W : array-like
         LVQ-trained prototype for the minority class
+
+    seed: int, optional, default=1
+        random generator seed
 
     sampling_strategy : float, optional, default=1.0
         the fraction between the two classes.
@@ -388,10 +393,13 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
     fail = 0
     imin, imax = 0, 0
     ratio_fac = 10
+    if verbose:
+        print('Using seed:', seed)
+    rng = np.random.default_rng(seed)
     if direct_hot_encoding:
         if verbose:
             print('Hot encoding')
-        rnd = np.random.random((nb_extra, X.shape[1]))
+        rnd = rng.random((nb_extra, X.shape[1]))
         if data_boundary:
             rnd = rnd * (Xmax - Xmin) + Xmin
         X_pos_extra = (rnd < W[0][1]) * 1  # augmented value 0 or 1
@@ -404,7 +412,7 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
         if verbose:
             print('nb_extra:', nb_extra, 'ratio:', ratio,
                   'nb_sample:', nb_sample)
-        rnd = np.random.random((nb_sample, X.shape[1]))
+        rnd = rng.random((nb_sample, X.shape[1]))
         if data_boundary:
             rnd = rnd * (Xmax - Xmin) + Xmin
         if hot_encoding:
@@ -616,12 +624,15 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
         ypred = lvq3_predict_proba(X[ind], W, len(W))
         print('LVQ training average precision:',
               average_precision_score(y[ind], ypred[1, :]))
+        print('LVQ training Cohen kappa:',
+              cohen_kappa_score(y[ind], np.rint(ypred[1, :])))
         W0.append(W[0][0])  # class 0
         W1.append(W[0][1])
         print('... augment the data')
         if data_boundary:
             print('data_boundary:', data_boundary)
         Xe, ye = lvq_extra(X[ind], y[ind], W, verbose=verbose,
+                           seed=seed,
                            sampling_strategy=sampling_strategy,
                            direct_hot_encoding=direct_hot_encoding,
                            data_boundary=data_boundary,

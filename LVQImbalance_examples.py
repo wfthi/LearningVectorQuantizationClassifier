@@ -37,6 +37,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import average_precision_score
+from sklearn.metrics import cohen_kappa_score
 import xgboost as xgb
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
@@ -79,10 +80,11 @@ print('Mean average precision training set: %.3f'
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1,
                                                     stratify=y,
                                                     random_state=42)
-# Combining SMOTE and LVQ augmentation
-sm = SMOTE(sampling_strategy=0.5)
+# Combining SMOTE and LVQ augmentation 80%/20%
+sm = SMOTE(sampling_strategy=0.8, random_state=1235)
 X_res, y_res = sm.fit_resample(X_train, y_train)
 X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(5, X_res, y_res,
+                                                    seed=2342,
                                                     sampling_strategy=1,
                                                     hot_encoding=False,
                                                     number_epochs=30)
@@ -103,6 +105,9 @@ print('Average precision on the test set: %.3f' %
       average_precision_score(y_test, mean_proba[:, 1]))
 # Mean average precision training set: 0.993
 # Average precision on the test set: 0.25-0.31
+print('Cohen kappa on the test set: %.3f' %
+      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
+# Cohen kappa on the test set: 0.204
 
 # use SMOTE only
 sm = SMOTE(sampling_strategy=1.0)
@@ -120,6 +125,9 @@ print('Average precision on the test set: %.3f' %
       average_precision_score(y_test, mean_proba[:, 1]))
 # Mean average precision training set: 0.988
 # Average precision on the test set: 0.248
+print('Cohen kappa on the test set: %.3f' %
+      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
+# Cohen kappa on the test set: 0.398
 
 # use SMOTE & RandomUnderSampler
 over = SMOTE(sampling_strategy=0.5)
@@ -140,6 +148,9 @@ print('Average precision on the test set: %.3f' %
       average_precision_score(y_test, mean_proba[:, 1]))
 # Mean average precision training set: 0.971
 # Average precision on the test set: 0.21-0.23
+print('Cohen kappa on the test set: %.3f' %
+      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
+# Cohen kappa on the test set: 0.205
 
 # ----------------------------------------------------------------
 # Example 2 protein homology prediction problem
