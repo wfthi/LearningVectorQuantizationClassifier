@@ -36,6 +36,7 @@ dataset. Then use the prototype to generate data of the minority class
 """
 from collections import Counter
 import numpy as np
+from sklearn.metrics import average_precision_score
 
 
 def init_lvq3(X, y, seed=2024):
@@ -181,7 +182,7 @@ def lvq3_predict_proba(X, W, nb_importance):
         trained prototype
 
     nb_importance : int
-        the number of entries in the input to be used to measure the 
+        the number of entries in the input to be used to measure the
         distance from a test input to the prototype, usually = the length of
         W
 
@@ -247,7 +248,8 @@ def train_lvq(X, y, random_seed=2024, number_epochs=100, verbose=False):
     return W
 
 
-def lvq_extra(X, y, W, hot_encoding=False, verbose=False, data_boundary=True):
+def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
+              hot_encoding=False, verbose=False, data_boundary=True):
     """
     Balance the classes from an imbalance input set
     (e.g. input with outliers).
@@ -271,6 +273,17 @@ def lvq_extra(X, y, W, hot_encoding=False, verbose=False, data_boundary=True):
 
     W : array-like
         LVQ-trained prototype for the minority class
+
+    sampling_strategy : float, optional, default=1.0
+        the fraction between the two classes.
+        sampling_strategy = 1. means that both classes will be balanced
+
+    direct_hot_encoding : boolean, optional, default=False
+        Use an alternative method to augment hot-encoding data
+        w1 is a value the prototype W1 for class 1
+        if random value(0, 1) < w1 : value = 1 else value = 0
+        For example if w1 = 0.2, there is 20% chance to get a value of 1
+        and 80% chance to get a value of 0
 
     hot_encoding : boolean, optional, default=False
         True if all the features are only 0 or 1 (hot-encoding)
@@ -339,25 +352,28 @@ def lvq_extra(X, y, W, hot_encoding=False, verbose=False, data_boundary=True):
     >>> print('Mean ROC AUC: %.3f' % np.mean(scores))
     >>> #  Mean ROC AUC: 0.990  # 30 epochs
     """
+    if sampling_strategy == 0.:
+        return X, y
+    if (sampling_strategy > 1.) or (sampling_strategy < 0.):
+        print("sampling_strategy has to be in [0, 1]")
+        return None, None
     if X.min() < 0:
         print("There are features with value < 0")
         return None, None
     if X.max() > 1.:
         print("There are features with value > 1")
         return None, None
-    W0 = W[0]
-    trh = W0[1]
     count_train = Counter(y)
-    nb_extra = (count_train[0] - count_train[1])
-    if verbose:
-        print('Require', nb_extra, 'data')
-    if nb_extra < 0:
+    if count_train[1] > count_train[0]:
         majority = 1
         minority = 0
-        nb_extra = -nb_extra
     else:
         majority = 0
         minority = 1
+    nb_extra = int(np.ceil(sampling_strategy * count_train[majority] -
+                           count_train[minority]))
+    if verbose:
+        print('Require', nb_extra, 'data')
     if verbose:
         print('Minority class', minority)
     wpos = y == minority
@@ -370,51 +386,63 @@ def lvq_extra(X, y, W, hot_encoding=False, verbose=False, data_boundary=True):
     ratio = int(count[majority] / count[minority])
     max_fail = 100
     fail = 0
-    if hot_encoding:
+    imin, imax = 0, 0
+    ratio_fac = 10
+    if direct_hot_encoding:
         if verbose:
             print('Hot encoding')
         rnd = np.random.random((nb_extra, X.shape[1]))
         if data_boundary:
             rnd = rnd * (Xmax - Xmin) + Xmin
-        X_pos_extra = (rnd < trh) * 1  # augmented value 0 or 1
-    else:
-        imin, imax = 0, 0
-        ratio_fac = 10
-        while imax < nb_extra:
-            nb_sample = int(ratio * nb_extra)
-            if verbose:
-                print('nb_extra:', nb_extra, 'ratio:', ratio,
-                      'nb_sample:', nb_sample)
-            rnd = np.random.random((nb_sample, X.shape[1]))
-            if data_boundary:
-                rnd = rnd * (Xmax - Xmin) + Xmin
-            dist = np.array([np.sum((rnd - WW)**2, 1) for WW in W0])
-            # only criterion is that the distance is closer to the minority
-            # prototype
-            w_new = np.argsort(dist, 0)[0] == minority
-            nb_new = np.count_nonzero(w_new)
-            if verbose:
-                print('nb_new:', nb_new)
-            if nb_new == 0:
-                if verbose:
-                    print('No new data from all the random draws')
-                ratio = ratio * ratio_fac
-                fail += 1
-                if fail > max_fail: 
-                    print('Augmentation failed')
-                    return None, None
-            ratio = np.min([ratio, 1000])
-            nb_more = np.min([nb_extra - imax, nb_new])
-            imin = imax
-            imax += nb_more
-            X_pos_extra[imin:imax, :] = rnd[w_new, :][0:nb_more]
+        X_pos_extra = (rnd < W[0][1]) * 1  # augmented value 0 or 1
+        X_extra = np.vstack((X_pos_extra, X))
+        y_extra = np.append(np.full(X_pos_extra.shape[0], 1), y)
+        return X_extra, y_extra
 
+    while imax < nb_extra:
+        nb_sample = int(ratio * nb_extra)
+        if verbose:
+            print('nb_extra:', nb_extra, 'ratio:', ratio,
+                  'nb_sample:', nb_sample)
+        rnd = np.random.random((nb_sample, X.shape[1]))
+        if data_boundary:
+            rnd = rnd * (Xmax - Xmin) + Xmin
+        if hot_encoding:
+            rnd = np.rint(rnd).astype(int)
+        dist = np.array([np.sum((rnd - WW)**2, 1) for WW in W[0]])
+        # only criterion is that the distance is closer to the minority
+        # prototype
+        w_new = np.argsort(dist, 0)[0] == minority
+        nb_new = np.count_nonzero(w_new)
+        if verbose:
+            print('nb_new:', nb_new)
+        if nb_new == 0:
+            if verbose:
+                print('No new data from all the random draws')
+            ratio = ratio * ratio_fac
+            fail += 1
+            if fail > max_fail:
+                print('Augmentation failed')
+                return None, None
+        ratio = np.min([ratio, 1000])
+        nb_more = np.min([nb_extra - imax, nb_new])
+        imin = imax
+        imax += nb_more
+        X_pos_extra[imin:imax, :] = rnd[w_new, :][0:nb_more]
+    # Check
+    d0 = np.sum((X_pos_extra - W[0][0])**2, 1)
+    d1 = np.sum((X_pos_extra - W[0][1])**2, 1)
+    assert np.count_nonzero((d1 < d0)) == X_pos_extra.shape[0]
+    d0 = np.sum((X - W[0][0])**2, 1)
+    d1 = np.sum((X - W[0][1])**2, 1)
     X_extra = np.vstack((X_pos_extra, X))
     y_extra = np.append(np.full(X_pos_extra.shape[0], 1), y)
     return X_extra, y_extra
 
 
 def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
+                   sampling_strategy=1., direct_hot_encoding=False,
+                   hot_encoding=False,
                    seed=1, verbose=False, data_boundary=True):
     """
     Balance the binary classes with multiple prototypes.
@@ -446,6 +474,16 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
 
     seed : int, optional, default = 1
         random generator seed value
+
+    hot_encoding : boolean, optional, default = False
+        whether the features should be 0 or 1 only
+
+    direct_hot_encoding : boolean, optional, default = False
+        Use an alternative method to augment hot-encoding data
+
+    sampling_strategy : float, optional, default=1.0
+        the fraction between the two classes.
+        sampling_strategy = 1. means that both classes will be balanced
 
     verbose : boolean, optional, default=False
         True to have screen logging
@@ -531,12 +569,14 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
     >>> print('Mean ROC AUC: %.3f' % np.mean(scores))
     >>> # Mean ROC AUC: 0.990 with 5-10 prototypes, number_epochs = 10
     """
-    uX = np.unique(X)
-    hot_encoding = False
     # check if the features are all hot-encodings
+    uX = np.unique(X)
+    mssg = "Warning: all features are 0 and 1 but the augmented will be floats"
     if len(uX) == 2:
         if all(np.unique(X) == [0., 1.]):
-            hot_encoding = True
+            if not hot_encoding:
+                print(mssg)
+                print('set hot_encoding=True to have only 0 or 1')
     ind_list = []
     split = [int(X.shape[0] / n_prototypes)] * (n_prototypes - 1)
     split.append(X.shape[0] - sum(split))
@@ -573,12 +613,17 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
         print('Training batch ', i + 1, '/', n_prototypes)
         W = train_lvq(X[ind], y[ind],
                       verbose=True, number_epochs=number_epochs)
+        ypred = lvq3_predict_proba(X[ind], W, len(W))
+        print('LVQ training average precision:',
+              average_precision_score(y[ind], ypred[1, :]))
         W0.append(W[0][0])  # class 0
         W1.append(W[0][1])
         print('... augment the data')
         if data_boundary:
             print('data_boundary:', data_boundary)
         Xe, ye = lvq_extra(X[ind], y[ind], W, verbose=verbose,
+                           sampling_strategy=sampling_strategy,
+                           direct_hot_encoding=direct_hot_encoding,
                            data_boundary=data_boundary,
                            hot_encoding=hot_encoding)
         if Xe is None and ye is None:
@@ -586,8 +631,9 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
         if i == 0:
             X_extra = Xe.copy()
             y_extra = ye.copy()
-        X_extra = np.vstack((X_extra, Xe))
-        y_extra = np.concatenate((y_extra, ye))
+        else:
+            X_extra = np.vstack((X_extra, Xe))
+            y_extra = np.concatenate((y_extra, ye))
         Xel.append(Xe)
         yel.append(ye)
     W0 = np.array(W0).T
