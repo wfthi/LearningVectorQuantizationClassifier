@@ -88,7 +88,9 @@ X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(5, X_res, y_res,
                                                     sampling_strategy=1,
                                                     hot_encoding=False,
                                                     number_epochs=30)
+
 dprototypes = np.sum((W0 - W1)**2, 0)  # distance between prototypes
+importance = np.flip(np.argsort(np.abs(W0 - W1).T, 1), 1)
 
 model = RandomForestClassifier()
 # Repeated cross-validation training
@@ -107,7 +109,7 @@ print('Average precision on the test set: %.3f' %
 # Average precision on the test set: 0.25-0.31
 print('Cohen kappa on the test set: %.3f' %
       cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
-# Cohen kappa on the test set: 0.204
+# Cohen kappa on the test set: 0.478
 
 # use SMOTE only
 sm = SMOTE(sampling_strategy=1.0)
@@ -353,12 +355,13 @@ Xas = scaler.transform(Xa)
 X_train, X_test, y_train, y_test = train_test_split(Xas, ya, test_size=0.2,
                                                     stratify=ya,
                                                     random_state=2421)
-sm = SMOTE(sampling_strategy=0.1)
+sm = SMOTE(sampling_strategy=0.5)
 X_res, y_res = sm.fit_resample(X_train, y_train)
 X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(3, X_res, y_res,
                                                     data_boundary=False,
                                                     verbose=True,
-                                                    sampling_strategy=0.5,
+                                                    seed=1234,
+                                                    sampling_strategy=0.8,
                                                     number_epochs=10)
 rus = RandomUnderSampler(sampling_strategy=1.0)
 X_extra, y_extra = rus.fit_resample(X_extra, y_extra)
@@ -379,6 +382,8 @@ mean_proba = np.mean(proba, 0)
 print('Average precision on the test set: %.3f' %
       average_precision_score(y_test, mean_proba[:, 1]))
 # Average precision on the test set: 0.080
+print('Cohen kappa on the test set: %.3f' %
+      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
 # plot the confusion matrix
 cm = confusion_matrix(y_test, np.rint(mean_proba[:, 1]))
 disp = ConfusionMatrixDisplay(confusion_matrix=cm)
