@@ -38,6 +38,7 @@ from collections import Counter
 import numpy as np
 from sklearn.metrics import average_precision_score
 from sklearn.metrics import cohen_kappa_score
+from sklearn.neighbors import BallTree
 
 
 def init_lvq3(X, y, seed=2024):
@@ -250,7 +251,7 @@ def train_lvq(X, y, random_seed=2024, number_epochs=100, verbose=False):
 
 
 def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
-              seed=1, append=True,
+              seed=1, nb_extra=None, append=True,
               hot_encoding=False, verbose=False, data_boundary=True):
     """
     Balance the classes from an imbalance input set
@@ -275,6 +276,11 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
 
     W : array-like
         LVQ-trained prototype for the minority class
+
+    nb_extra : int, optional, default=None
+        the request number of symthetic data
+        if None, the code will use the imbalance ratio and the
+        sampling_strategy value.
 
     append : boolean, optional, default=True
         append the augmented data to the input
@@ -378,8 +384,9 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
     else:
         majority = 0
         minority = 1
-    nb_extra = int(np.ceil(sampling_strategy * count_train[majority] -
-                           count_train[minority]))
+    if nb_extra is None:
+        nb_extra = int(np.ceil(sampling_strategy * count_train[majority] -
+                               count_train[minority]))
     if verbose:
         print('Require', nb_extra, 'data')
     if verbose:
@@ -457,6 +464,65 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
         X_extra = X_pos_extra
         y_extra = np.full(X_pos_extra.shape[0], 1)
     return X_extra, y_extra
+
+
+def random_split(n_prototypes, X, y, seed=1):
+    """
+    Split the input into n_prototypes batches. It returns a list of
+    indices for each batch
+
+    Parameters
+    ----------
+    n_prototypes : int
+        the number of prototype per class.
+        n_prototypes = 2 means 2 for each class in y
+
+    X : array-like
+        original input data set scaled to values beween 0 and 1
+
+    y : array-like
+        original input classes
+
+    seed : int, optional, default = 1
+        random generator seed value
+
+    Return
+    ------
+     : list of arrays
+        a list of indices for each batch (n_prototypes batches)
+    """
+    ind_list = []
+    split = [int(X.shape[0] / n_prototypes)] * (n_prototypes - 1)
+    split.append(X.shape[0] - sum(split))
+    lind = X.shape[0]
+    indall = np.arange(0, lind, 1)
+    yall = y.copy()
+    count = Counter(y)
+    ly = len(y)
+    rng = np.random.default_rng(seed)
+    print('Split randomly the input dataset into batches')
+    for i, sp in enumerate(split):
+        print('Batch ', i + 1, '/', n_prototypes)
+        ind = np.arange(0, lind, 1)
+        w0 = np.where(yall == 0)[0]
+        w1 = np.where(yall == 1)[0]
+        mask = np.ones(len(ind), dtype=bool)
+        if i < n_prototypes - 1:  # stratifield choice
+            sp1 = int(np.max([1, sp * count[1] / ly]))
+            sp0 = sp - sp1
+            mask[rng.choice(ind[w0], sp0, replace=False)] = False
+            if len(w1) == 0:
+                print('Not enough entry for class 1')
+                print('Try decreasing the nunber of prototypes')
+                return None, None, None, None, None, None
+            mask[rng.choice(ind[w1], sp1, replace=False)] = False
+        else:  # last batch, use the rest of the data
+            mask[rng.choice(ind, sp, replace=False)] = False
+        ind_list.append(indall[~mask])
+        indall = indall[mask]
+        yall = yall[mask]
+        lind -= sp
+    return ind_list
 
 
 def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
@@ -599,41 +665,11 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
             if not hot_encoding:
                 print(mssg)
                 print('set hot_encoding=True to have only 0 or 1')
-    ind_list = []
-    split = [int(X.shape[0] / n_prototypes)] * (n_prototypes - 1)
-    split.append(X.shape[0] - sum(split))
-    lind = X.shape[0]
-    indall = np.arange(0, lind, 1)
-    yall = y.copy()
-    count = Counter(y)
-    ly = len(y)
-    rng = np.random.default_rng(seed)
-    print('Split randomly the input dataset into batches')
-    for i, sp in enumerate(split):
-        print('Batch ', i + 1, '/', n_prototypes)
-        ind = np.arange(0, lind, 1)
-        w0 = np.where(yall == 0)[0]
-        w1 = np.where(yall == 1)[0]
-        mask = np.ones(len(ind), dtype=bool)
-        if i < n_prototypes - 1:  # stratifield choice
-            sp1 = int(np.max([1, sp * count[1] / ly]))
-            sp0 = sp - sp1
-            mask[rng.choice(ind[w0], sp0, replace=False)] = False
-            if len(w1) == 0:
-                print('Not enough entry for class 1')
-                print('Try decreasing the nunber of prototypes')
-                return None, None, None, None, None, None
-            mask[rng.choice(ind[w1], sp1, replace=False)] = False
-        else:  # last batch, use the rest of the data
-            mask[rng.choice(ind, sp, replace=False)] = False
-        ind_list.append(indall[~mask])
-        indall = indall[mask]
-        yall = yall[mask]
-        lind -= sp
+    ind_list = random_split(n_prototypes, X, y, seed=seed)
     W0, W1, Xel, yel = [], [], [], []
     for i, ind in enumerate(ind_list):
         print('Training batch ', i + 1, '/', n_prototypes)
-        W = train_lvq(X[ind], y[ind],
+        W = train_lvq(X[ind], y[ind], random_seed=i,
                       verbose=True, number_epochs=number_epochs)
         ypred = lvq3_predict_proba(X[ind], W, len(W))
         print('LVQ training average precision:',
@@ -665,3 +701,206 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
     W0 = np.array(W0).T
     W1 = np.array(W1).T
     return X_extra, y_extra, Xel, yel, W0, W1
+
+
+def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
+             append=True,
+             kneighbours=30, number_epochs=10,
+             data_boundary=True,
+             sampling_strategy=1.0,
+             learning_starting_rate=0.05,
+             learning_rate_decrease=0.95,
+             minimum_learning_rate=0.001,
+             m=0.3,
+             iter_max_fac=10,
+             verbose=False):
+    """
+    Local LVQ learning by splitting the data. kneighbours is found
+    around a randomly chosen minority instance and LVQ is used to
+    find a local prototype for each class. n_prototypes
+    prototype-pairs are created. To syntheize new data, random values are
+    computed and the closest distance prototype-pair is chosen and the
+    distance between the two classes is used to accept the the new values as
+    new data.
+
+    Parameters
+    ----------
+    n_prototypes : int
+        the number of prototype per class.
+        n_prototypes = 2 means 2 for each class in y
+
+    X : array-like
+        original input data set scaled to values beween 0 and 1
+
+    y : array-like
+        original input classes
+
+    kneighbours : int, optional, default=30
+        the number of neighbouring points to use for the local learning
+
+    number_epochs : int, optional, default = 10
+        the number of epochs used for the lvq training
+
+    seed : int, optional, default = 1
+        random generator seed value
+
+    append : boolean, optional, default=True
+        append the augmented data to the input
+
+    nb_extra : int, optional, default=None
+        the number of extra minority data point to be generated
+        if None, the diffference in the input between the two
+        classes is used together with the value of sampling_strategy
+
+    sampling_strategy : float, optional, default=1.0
+        the fraction between the two classes.
+        sampling_strategy = 1. means that both classes will be balanced
+
+    verbose : boolean, optional, default=False
+        True to have screen logging
+
+    data_boundary : boolean, optional, default=True
+        if True, bound the augmented data within the range of the input
+
+    learning_starting_rate : float, optional, default=0.05
+        the starting value of the learning rate for the LVQ3
+
+    learning_rate_decrease : float, optional, default=0.95
+        the learning rate decrease factor (< 1)
+
+    minimum_learning_rate : float, optional, default=0.001
+        the minimum learning rate
+
+    m : float, optional, default=0.3
+        a damping factor for the learning between 0 < m < 1
+
+    iter_max_fac : optinal, int, default=10
+        the number of attempts to find a new valid data per required
+        new data
+
+    Returns
+    -------
+    X_extra : list
+        list of original + extra datasets
+        one entry per prototype
+
+    y_extra : list
+        list of original + extra corresponding classes
+
+    W0: list
+        the weights for the class 0
+
+    W1 : list
+        the weights for the class 1
+
+    Example
+    -------
+    >>> import numpy as np
+    >>> from collections import Counter
+    >>> import matplotlib.pyplot as plt
+    >>> from sklearn.datasets import make_moons, make_circles
+    >>> from sklearn.preprocessing import MinMaxScaler
+    >>> from imblearn.datasets import make_imbalance
+    >>> from LVQImbalance import tree_lvq
+    >>> # create the Moon sample
+    >>> Xmoon, ymoon = make_moons(n_samples=600, noise=0.2, random_state=0)
+    >>> sampling_strategy = {1: 50}
+    >>> X_imb, y_imb = make_imbalance(Xmoon, ymoon,
+    ...                               sampling_strategy=sampling_strategy)
+    >>> scaler = MinMaxScaler(feature_range=(0, 1))
+    >>> scaler.fit(X_imb)
+    >>> Xs = scaler.transform(X_imb)
+    >>> n_prototypes =  10
+    >>> count = Counter(y_imb)
+    >>> nb_extra = count[0] - count[1] - n_prototypes
+    >>> X_lvq, y_lvq, W0, W1 = tree_lvq(n_prototypes, Xs, y_imb,
+    ...                                 nb_extra=nb_extra)
+    >>> X_extra = np.vstack((X_lvq, W1))
+    >>> y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
+    >>> w = y_imb == 0
+    >>> size = 10
+    >>> plt.scatter(X_lvq[:, 0], X_lvq[:, 1], s=20, label='LVQ')
+    >>> plt.scatter(Xs[w, 0], Xs[w, 1], s=size, label='Majority')
+    >>> plt.scatter(Xs[~w, 0], Xs[~w, 1], s=size, label='Minority')
+    >>> plt.scatter(W0[:, 0], W0[:, 1], s=50, marker='*', label='0')
+    >>> plt.scatter(W1[:, 0], W1[:, 1], s=50, marker='*', label='1')
+    >>> plt.xlabel('X1')
+    >>> plt.xlabel('X2')
+    >>> plt.legend()
+    >>> plt.tight_layout()
+    >>> plt.show()
+    """
+    assert X.shape[0] > kneighbours
+    count = Counter(y)
+    tree = BallTree(X, leaf_size=2)
+    if count[0] > count[1]:
+        majority = 0
+        minority = 1
+    else:
+        majority = 1
+        minority = 0
+    wminority = np.where(y == minority)[0]
+    iminority_array = np.random.choice(wminority, n_prototypes, replace=False)
+    W0, W1 = [], []
+    for iminority in iminority_array:
+        indtree = tree.query(X[iminority, :].reshape(1, -1),
+                             k=kneighbours,
+                             return_distance=False)
+        wmajority = np.where(y[indtree[0][1:]] == majority)[0]
+        imajority = indtree[0][1 + np.random.choice(wmajority)]
+        Winit = np.stack((X[imajority, :], X[iminority, :]))
+        ly = len(y)
+        mask = np.zeros(ly, dtype=bool)
+        mask[indtree[0][1:]] = True
+        mask[iminority] = False
+        mask[imajority] = False
+        X_train = X[mask, :]
+        y_train = y[mask]
+        # 0.1 < m < 0.5 is a stabilizing constant.
+        W = lvq3_train(X_train, y_train, Winit,
+                       learning_starting_rate,
+                       learning_rate_decrease,
+                       number_epochs,
+                       minimum_learning_rate,
+                       m,
+                       verbose=verbose)
+        W0.append(W[0][0])
+        W1.append(W[0][1])
+    W0 = np.array(W0)
+    W1 = np.array(W1)
+    # synthetic data generation
+    if nb_extra is None:
+        nb_extra = int(np.ceil(sampling_strategy * count[majority] -
+                               count[minority]))
+    wpos = y == minority
+    Xmin = X[wpos, :].min(0)
+    Xmax = X[wpos, :].max(0)
+    iter = 0
+    npos = 0
+    iter_max = iter_max_fac * nb_extra
+    pos = []
+    while npos < nb_extra and iter < iter_max:
+        iter += 1
+        rng = np.random.default_rng(seed + iter)
+        rnd = rng.random(2)
+        if data_boundary:
+            rnd = rnd * (Xmax - Xmin) + Xmin
+        d0 = np.sum((rnd - W0)**2, 1)
+        d1 = np.sum((rnd - W1)**2, 1)
+        # find the closest prototype pairs and compare
+        # the distances to them
+        imin = np.argmin(d0 + d1)
+        if np.mean((d1[imin] < d0[imin]) * 1) > 0.5:
+            pos.append(rnd)
+            npos += 1
+    if iter >= iter_max:
+        print("Not enough synthetic data generated.")
+        print("Please increase iter_max_fac")
+    pos = np.array(pos)
+    if append:
+        X_extra = np.vstack((X, pos))
+        y_extra = np.append(y, np.full(nb_extra, 1))
+    else:
+        X_extra = pos
+        y_extra = np.full(nb_extra, 1)
+    return X_extra, y_extra, W0, W1
