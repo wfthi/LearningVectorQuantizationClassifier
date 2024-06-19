@@ -716,12 +716,15 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
              verbose=False):
     """
     Local LVQ learning by splitting the data. kneighbours is found
-    around a randomly chosen minority instance and LVQ is used to
-    find a local prototype for each class. n_prototypes
+    around (distance^2 metric) a randomly chosen minority instance and LVQ
+    is used to find a local prototype for each class. n_prototypes
     prototype-pairs are created. To syntheize new data, random values are
     computed and the closest distance prototype-pair is chosen and the
     distance between the two classes is used to accept the the new values as
     new data.
+    The strategy is unlike lvq_prototypes where the splitting is done by
+    drawing randomly a sample within the entire dataset. This method can
+    result in prototypes that cover more uniformely the feature space.
 
     Parameters
     ----------
@@ -801,6 +804,7 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
     >>> from sklearn.datasets import make_moons, make_circles
     >>> from sklearn.preprocessing import MinMaxScaler
     >>> from imblearn.datasets import make_imbalance
+    >>> from imblearn.over_sampling import SMOTE
     >>> from LVQImbalance import tree_lvq
     >>> # create the Moon sample
     >>> Xmoon, ymoon = make_moons(n_samples=600, noise=0.2, random_state=0)
@@ -810,7 +814,7 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
     >>> scaler = MinMaxScaler(feature_range=(0, 1))
     >>> scaler.fit(X_imb)
     >>> Xs = scaler.transform(X_imb)
-    >>> n_prototypes =  10
+    >>> n_prototypes = 10
     >>> count = Counter(y_imb)
     >>> nb_extra = count[0] - count[1] - n_prototypes
     >>> X_lvq, y_lvq, W0, W1 = tree_lvq(n_prototypes, Xs, y_imb,
@@ -825,7 +829,31 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
     >>> plt.scatter(W0[:, 0], W0[:, 1], s=50, marker='*', label='0')
     >>> plt.scatter(W1[:, 0], W1[:, 1], s=50, marker='*', label='1')
     >>> plt.xlabel('X1')
-    >>> plt.xlabel('X2')
+    >>> plt.ylabel('X2')
+    >>> plt.legend()
+    >>> plt.tight_layout()
+    >>> plt.show()
+    >>> # SMOTE + Tree-LVQ
+    >>> sm = SMOTE(sampling_strategy=0.5, random_state=1235)
+    >>> X_res, y_res = sm.fit_resample(Xs, y_imb)
+    >>> n_prototypes = 10
+    >>> count = Counter(y_res)
+    >>> nb_extra = count[0] - count[1] - n_prototypes
+    >>> X_lvq, y_lvq, W0, W1 = tree_lvq(n_prototypes, X_res, y_res,
+    ...                                 append=False,
+    ...                                 nb_extra=nb_extra, verbose=True)
+    >>> X_extra = np.vstack((X_lvq, W1))
+    >>> y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
+    >>> w = y_imb == 0
+    >>> size = 10
+    >>> plt.scatter(X_res[:, 0], X_res[:, 1], s=20, label='SMOTE')
+    >>> plt.scatter(X_lvq[:, 0], X_lvq[:, 1], s=20, label='LVQ')
+    >>> plt.scatter(Xs[w, 0], Xs[w, 1], s=size, label='Majority')
+    >>> plt.scatter(Xs[~w, 0], Xs[~w, 1], s=size, label='Minority')
+    >>> plt.scatter(W0[:, 0], W0[:, 1], s=50, marker='*', label='0')
+    >>> plt.scatter(W1[:, 0], W1[:, 1], s=50, marker='*', label='1')
+    >>> plt.xlabel('X1')
+    >>> plt.ylabel('X2')
     >>> plt.legend()
     >>> plt.tight_layout()
     >>> plt.show()
@@ -840,23 +868,46 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
         majority = 1
         minority = 0
     wminority = np.where(y == minority)[0]
-    iminority_array = np.random.choice(wminority, n_prototypes, replace=False)
     W0, W1 = [], []
-    for iminority in iminority_array:
-        indtree = tree.query(X[iminority, :].reshape(1, -1),
-                             k=kneighbours,
-                             return_distance=False)
-        wmajority = np.where(y[indtree[0][1:]] == majority)[0]
-        imajority = indtree[0][1 + np.random.choice(wmajority)]
-        Winit = np.stack((X[imajority, :], X[iminority, :]))
-        ly = len(y)
-        mask = np.zeros(ly, dtype=bool)
-        mask[indtree[0][1:]] = True
-        mask[iminority] = False
-        mask[imajority] = False
-        X_train = X[mask, :]
-        y_train = y[mask]
-        # 0.1 < m < 0.5 is a stabilizing constant.
+    itry_max = 100
+    for i in range(n_prototypes):
+        cy = 0
+        if verbose:
+            print('Prototype:', i)
+        itry = 0
+        lmaj = 1
+        while cy <= 1:
+            itry += 1
+            iminority = np.random.choice(wminority, replace=False)
+            indtree = tree.query(X[iminority, :].reshape(1, -1),
+                                 k=kneighbours,
+                                 return_distance=False)
+            wmajority = np.where(y[indtree[0][1:]] == majority)[0]
+            lmaj = len(wmajority)
+            if verbose:
+                print('Number of majority sample', lmaj)
+            if lmaj < 2:  # both the majority and minority sample >= 2
+                continue
+            # Find a majority instance among the neighbours
+            imajority = indtree[0][1 + np.random.choice(wmajority)]
+            Winit = np.stack((X[imajority, :], X[iminority, :]))
+            ly = len(y)
+            mask = np.zeros(ly, dtype=bool)
+            mask[indtree[0][1:]] = True
+            mask[iminority] = False
+            mask[imajority] = False
+            X_train = X[mask, :]
+            y_train = y[mask]
+            # 0.1 < m < 0.5 is a stabilizing constant.
+            counter_y = Counter(y_train)
+            cy = counter_y[minority]
+            if itry > itry_max:
+                print("Cannot find the vlid split")
+                print("Try a lower number of prototypes or more neighbours")
+                return None, None, None, None
+        wminority = wminority[wminority != iminority]
+        if verbose:
+            print("Number of minority sample",  cy)
         W = lvq3_train(X_train, y_train, Winit,
                        learning_starting_rate,
                        learning_rate_decrease,
@@ -879,10 +930,11 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
     npos = 0
     iter_max = iter_max_fac * nb_extra
     pos = []
+    nrnd = X.shape[1]
     while npos < nb_extra and iter < iter_max:
         iter += 1
         rng = np.random.default_rng(seed + iter)
-        rnd = rng.random(2)
+        rnd = rng.random(nrnd)
         if data_boundary:
             rnd = rnd * (Xmax - Xmin) + Xmin
         d0 = np.sum((rnd - W0)**2, 1)
