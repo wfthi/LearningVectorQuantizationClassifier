@@ -24,6 +24,30 @@
 
     Python : > version 3
 
+    SMOTE is not very practical for high-dimensional data.
+
+    The LVQ method generates synthetic samples to occupy more feature space
+    than the existing SMOTE algorithms. The algorithm of LVQ is a supervised
+    version of K-means algorithm. The algorithm of LVQ commputes a number of
+    centroids called prototypes (or codebooks) for each feature based on a
+    distance metric.
+
+    The LVQ method is limited by the performance of the LVQ training. When the
+    training accuracy is high, the synthetic sample will have a high fidelity.
+    The LVQ training is first improved by performing a resampling using the
+    SMOTE meethod.
+
+    While generating synthetic examples, SMOTE does not take into consideration
+    neighboring examples that can be from other classes. This can increase the
+    overlapping of classes and can introduce additional noise. The LVQ generation
+    accounts for the majority class and the synthetic data
+
+    Reference
+    Munehiro Nakamura, Yusuke Kajiwara, Atsushi Otsuka, and Haruhiko Kimura.
+    LVQ-SMOTE- learning vector quantization based synthetic minority
+    over-sampling technique for biomedical data. BioData mining,
+    6(1):1-10, 2013.
+
 """
 from collections import Counter
 import numpy as np
@@ -38,6 +62,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import average_precision_score
 from sklearn.metrics import cohen_kappa_score
+from sklearn.metrics import matthews_corrcoef
 import xgboost as xgb
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
@@ -60,7 +85,7 @@ def fit_and_score(estimator, X_train, X_evaluation, y_train, y_evaluation):
 
 
 # ----------------------------------------------------------------
-# Example 1: Solar Flare prediction
+# Example 1: Solar Flare prediction class 0: 1321, class 1: 68
 solar_flare = fetch_datasets()['solar_flare_m0']
 solar_flare.data.shape
 count = Counter(solar_flare.target)
@@ -81,6 +106,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1,
                                                     stratify=y,
                                                     random_state=42)
 # Combining SMOTE and LVQ augmentation 80%/20%
+# SMOTE + LVQ
 sm = SMOTE(sampling_strategy=0.8, random_state=1235)
 X_res, y_res = sm.fit_resample(X_train, y_train)
 X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(5, X_res, y_res,
@@ -110,6 +136,8 @@ print('Average precision on the test set: %.3f' %
 print('Cohen kappa on the test set: %.3f' %
       cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
 # Cohen kappa on the test set: 0.478
+print('Matthews correlation coefficient  on the test set: %.3f' %
+      matthews_corrcoef(y_test, np.rint(mean_proba[:, 1])))
 
 # use SMOTE only
 sm = SMOTE(sampling_strategy=1.0)
@@ -204,6 +232,9 @@ proba_xgb = clf.predict_proba(X_test)
 print('XGBoost Average precision on the test set: %.3f' %
       average_precision_score(y_test, proba_xgb[:, 1]))
 # XGBoost Average precision on the test set: 0.86 - 0.9
+print('Cohen kappa on the test set: %.3f' %
+      cohen_kappa_score(y_test, np.rint(proba_xgb[:, 1])))
+# Cohen kappa on the test set: 0.869
 
 # plot the confusion matrix
 cm = confusion_matrix(y_test, (proba_xgb[:, 1] > 0.40))
@@ -246,6 +277,9 @@ mean_proba = proba[:, 1] / n_splits
 print('Average precision on the test set: %.3f' %
       average_precision_score(y_test, mean_proba))
 # Average precision on the test set: 0.934
+print('Cohen kappa on the test set: %.3f' %
+      cohen_kappa_score(y_test, np.rint(proba_xgb[:, 1])))
+# Cohen kappa on the test set: 0.869
 
 # plot the confusion matrix
 cm = confusion_matrix(y_test, np.rint(mean_proba))
@@ -344,7 +378,7 @@ disp.plot()
 plt.show()
 
 # ----------------------------------------------------------------
-# Example 3 Abalone, a 130/1 ratio with only 4177 data
+# Example 3 Abalone 19, a 130/1 ratio with only 4177 data
 abalone = fetch_datasets()['abalone_19']
 Xa = abalone.data
 ya = abalone.target
