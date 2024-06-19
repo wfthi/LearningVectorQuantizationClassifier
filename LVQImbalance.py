@@ -450,14 +450,18 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
     assert np.count_nonzero((d1 < d0)) == X_pos_extra.shape[0]
     d0 = np.sum((X - W[0][0])**2, 1)
     d1 = np.sum((X - W[0][1])**2, 1)
-    X_extra = np.vstack((X_pos_extra, X))
-    y_extra = np.append(np.full(X_pos_extra.shape[0], 1), y)
+    if append:
+        X_extra = np.vstack((X_pos_extra, X))
+        y_extra = np.append(np.full(X_pos_extra.shape[0], 1), y)
+    else:
+        X_extra = X_pos_extra
+        y_extra = np.full(X_pos_extra.shape[0], 1)
     return X_extra, y_extra
 
 
 def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
                    sampling_strategy=1., direct_hot_encoding=False,
-                   hot_encoding=False,
+                   hot_encoding=False, append=True,
                    seed=1, verbose=False, data_boundary=True):
     """
     Balance the binary classes with multiple prototypes.
@@ -489,6 +493,9 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
 
     seed : int, optional, default = 1
         random generator seed value
+
+    append : boolean, optional, default=True
+        append the augmented data to the input
 
     hot_encoding : boolean, optional, default = False
         whether the features should be 0 or 1 only
@@ -601,7 +608,7 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
     count = Counter(y)
     ly = len(y)
     rng = np.random.default_rng(seed)
-    print('Split the input dataset into batches')
+    print('Split randomly the input dataset into batches')
     for i, sp in enumerate(split):
         print('Batch ', i + 1, '/', n_prototypes)
         ind = np.arange(0, lind, 1)
@@ -640,6 +647,7 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
             print('data_boundary:', data_boundary)
         Xe, ye = lvq_extra(X[ind], y[ind], W, verbose=verbose,
                            seed=seed,
+                           append=append,
                            sampling_strategy=sampling_strategy,
                            direct_hot_encoding=direct_hot_encoding,
                            data_boundary=data_boundary,
