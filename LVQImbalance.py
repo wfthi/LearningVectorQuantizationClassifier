@@ -40,6 +40,7 @@ from sklearn.metrics import average_precision_score
 from sklearn.metrics import cohen_kappa_score
 from sklearn.neighbors import BallTree
 from sklearn.cluster import KMeans
+from sklearn.datasets import make_swiss_roll
 
 
 def init_lvq3(X, y, seed=2024):
@@ -844,8 +845,8 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
     >>> X_lvq, y_lvq, W0, W1 = tree_lvq(n_prototypes, X_res, y_res,
     ...                                 append=False,
     ...                                 nb_extra=nb_extra, verbose=True)
-    >>> X_extra = np.vstack((X_lvq, W1))
-    >>> y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
+    >>> X_extra = np.vstack((X_res, X_lvq, W1))
+    >>> y_extra = np.concatenate((y_res, y_lvq, np.full(n_prototypes, 1)))
     >>> w = y_imb == 0
     >>> size = 10
     >>> plt.scatter(X_res[:, 0], X_res[:, 1], s=20, label='SMOTE')
@@ -1063,7 +1064,43 @@ def kmeans_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
     >>> from sklearn.preprocessing import MinMaxScaler
     >>> from imblearn.datasets import make_imbalance
     >>> from imblearn.over_sampling import SMOTE
+    >>> from scipy.spatial import ConvexHull, convex_hull_plot_2d
     >>> from LVQImbalance import kmeans_lvq
+    >>> Xc, yc = make_circles(n_samples=600, noise=0.2, factor=0.5,
+    ...                       random_state=0)
+    >>> sampling_strategy = {1: 50}
+    >>> X_circ, y_circ = make_imbalance(Xc, yc,
+    ...                               sampling_strategy=sampling_strategy)
+    >>> scaler = MinMaxScaler(feature_range=(0, 1))
+    >>> scaler.fit(X_circ)
+    >>> Xs = scaler.transform(X_circ)
+    >>> n_prototypes = 10
+    >>> count = Counter(y_imb)
+    >>> nb_extra = count[0] - count[1] - n_prototypes * 2
+    >>> X_lvq, y_lvq, W0, W1, W0init, W1init, cntr =\
+    ...    kmeans_lvq(n_prototypes, Xs, y_circ,
+    ...               number_epochs=10,
+    ...               nb_extra=nb_extra)
+    >>> X_extra = np.vstack((X_lvq, W1, cntr))
+    >>> y_extra = np.append(y_lvq, np.full(2 * n_prototypes, 1))
+    >>> hull0 = ConvexHull(W0)
+    >>> wc = y_circ == 0
+    >>> size = 10
+    >>> plt.scatter(X_lvq[:, 0], X_lvq[:, 1], s=20, label='LVQ')
+    >>> plt.scatter(Xs[wc, 0], Xs[wc, 1], s=size, label='Majority')
+    >>> plt.scatter(Xs[~wc, 0], Xs[~wc, 1], s=size, label='Minority')
+    >>> plt.scatter(W0[:, 0], W0[:, 1], s=50, marker='*', label='Prototype 0')
+    >>> plt.scatter(W1[:, 0], W1[:, 1], s=50, marker='*', label='Prototype 1')
+    >>> plt.scatter(cntr[:, 0], cntr[:, 1], s=50, marker='+',
+    ...             label='kmeans cntr')
+    >>> for simplex in hull0.simplices:
+    >>>     plt.plot(W0[simplex, 0], W0[simplex, 1], 'k-')
+    >>> plt.xlabel('X1')
+    >>> plt.ylabel('X2')
+    >>> plt.legend()
+    >>> plt.tight_layout()
+    >>> plt.show()
+    >>> #
     >>> # create the Moon sample
     >>> Xmoon, ymoon = make_moons(n_samples=600, noise=0.2, random_state=0)
     >>> sampling_strategy = {1: 50}
