@@ -71,6 +71,7 @@ from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from LVQImbalance import lvq_prototypes
 from LVQImbalance import tree_lvq
+from LVQImbalance import kmeans_lvq
 
 
 # XGBoost cross-validation model
@@ -107,7 +108,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1,
                                                     stratify=y,
                                                     random_state=42)
 
-# SMOTE + tree-LVQ (kmeans-LVQs)
+# SMOTE + tree-LVQ
 sm = SMOTE(sampling_strategy=0.8, random_state=1235)
 X_res, y_res = sm.fit_resample(X_train, y_train)
 n_prototypes = 5
@@ -118,6 +119,16 @@ X_lvq, y_lvq, W0, W1 = tree_lvq(n_prototypes, X_res, y_res,
                                 nb_extra=nb_extra)
 X_extra = np.vstack((X_lvq, W1))
 y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
+
+# SMOTE + kmeans-LVQs
+nb_extra = count[0] - count[1] - n_prototypes * 2
+X_lvq, y_lvq, W0, W1, W0init, W1init, cntr =\
+      kmeans_lvq(n_prototypes, X_res, y_res,
+                 number_epochs=30, append=False,
+                 nb_extra=nb_extra)
+X_extra = np.vstack((X_res, X_lvq, W1, cntr))
+y_extra = np.concatenate((y_res, y_lvq, np.full(2 * n_prototypes, 1)))
+
 
 # Combining SMOTE and LVQ augmentation 80%/20%
 # SMOTE + LVQ
