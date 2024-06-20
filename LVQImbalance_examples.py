@@ -107,7 +107,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1,
                                                     stratify=y,
                                                     random_state=42)
 
-# SMOTE + tree-LVQ
+# SMOTE + tree-LVQ (kmeans-LVQs)
 sm = SMOTE(sampling_strategy=0.8, random_state=1235)
 X_res, y_res = sm.fit_resample(X_train, y_train)
 n_prototypes = 5
