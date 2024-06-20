@@ -44,10 +44,17 @@
 
     Reference
     Munehiro Nakamura, Yusuke Kajiwara, Atsushi Otsuka, and Haruhiko Kimura.
-    LVQ-SMOTE- learning vector quantization based synthetic minority
-    over-sampling technique for biomedical data. BioData mining,
+    "LVQ-SMOTE- learning vector quantization based synthetic minority
+    over-sampling technique for biomedical data". BioData mining,
     6(1):1-10, 2013.
 
+      N. V. Chawla, K. W. Bowyer, L. O.Hall, W. P. Kegelmeyer,
+      “SMOTE: synthetic minority over-sampling technique,” Journal of
+      artificial intelligence research, 321-357, 2002.
+
+      H. Han, W. Wen-Yuan, M. Bing-Huan, “Borderline-SMOTE: a new
+      over-sampling method in imbalanced data sets learning,” Advances in
+      intelligent computing, 878-887, 2005.
 """
 from collections import Counter
 import numpy as np
@@ -69,10 +76,21 @@ import matplotlib.pyplot as plt
 from imblearn.pipeline import Pipeline
 from imblearn.over_sampling import SMOTE
 from imblearn.over_sampling import BorderlineSMOTE
+from imblearn.over_sampling import ADASYN
 from imblearn.under_sampling import RandomUnderSampler
 from LVQImbalance import lvq_prototypes
 from LVQImbalance import tree_lvq
 from LVQImbalance import kmeans_lvq
+
+
+def resampler(method, strategy=1.0, random_state=1235):
+    resampler = {"SMOTE": SMOTE(sampling_strategy=strategy,
+                                random_state=random_state),
+                 "BordelineSMOTE": BorderlineSMOTE(sampling_strategy=strategy,
+                                                   random_state=random_state),
+                 "ADASYN": ADASYN(sampling_strategy=strategy,
+                                  random_state=random_state)}
+    return resampler[method]
 
 
 # XGBoost cross-validation model
@@ -87,6 +105,108 @@ def fit_and_score(estimator, X_train, X_evaluation, y_train, y_evaluation):
     return estimator, train_score, evaluation_score
 
 
+def cv_training(model, X_train, y_train, X_test, y_test):
+    # Cross-validation training
+    cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+    scores = cross_validate(model, X_train, y_train,
+                            scoring='average_precision',
+                            cv=cv, n_jobs=-1, return_estimator=True)
+    print('Mean average precision training set: %.3f' %
+          np.mean(scores['test_score']))
+    proba = []
+    for mod in scores['estimator']:
+        proba.append(mod.predict_proba(X_test))
+    mean_proba = np.mean(proba, 0)
+    print('Average precision on the test set: %.3f' %
+          average_precision_score(y_test, mean_proba[:, 1]))
+    # Mean average precision training set: 0.988
+    # Average precision on the test set: 0.248
+    print('Cohen kappa on the test set: %.3f' %
+          cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
+    print('Matthews correlation coefficient  on the test set: %.3f' %
+          matthews_corrcoef(y_test, np.rint(mean_proba[:, 1])))
+    return mean_proba
+
+
+def SMOTE_treeLVQ(model, method, X_train, y_train, X_test, y_test,
+                  res_strategy=0.8):
+    print()
+    print(method, " + Tree-LVQs")
+    sm = resampler(method, strategy=res_strategy, random_state=1235)
+    X_res, y_res = sm.fit_resample(X_train, y_train)
+    n_prototypes = 5
+    count = Counter(y_res)
+    nb_extra = count[0] - count[1] - n_prototypes
+    X_lvq, y_lvq, _, W1 = tree_lvq(n_prototypes, X_res, y_res,
+                                   kneighbours=200, iter_max_fac=1000,
+                                   number_epochs=30,
+                                   nb_extra=nb_extra)
+    X_extra = np.vstack((X_lvq, W1))
+    y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
+    mean_proba = cv_training(model, X_extra, y_extra, X_test, y_test)
+    return mean_proba
+
+
+def SMOTE_kmeansLVQ(model, method, X_train, y_train, X_test, y_test,
+                    res_strategy=0.8):
+    # SMOTE + kmeans-LVQs
+    print()
+    print(method, " + kmeans-LVQs")
+    sm = resampler(method, strategy=res_strategy, random_state=1235)
+    X_res, y_res = sm.fit_resample(X_train, y_train)
+    n_prototypes = 5
+    count = Counter(y_res)
+    nb_extra = count[0] - count[1] - n_prototypes * 2
+    X_lvq, y_lvq, _, W1, _, _, cntr =\
+        kmeans_lvq(n_prototypes, X_res, y_res,
+                   number_epochs=30, append=False,
+                   iter_max_fac=1000,
+                   nb_extra=nb_extra)
+    X_extra = np.vstack((X_res, X_lvq, W1, cntr))
+    y_extra = np.concatenate((y_res, y_lvq, np.full(2 * n_prototypes, 1)))
+    mean_proba = cv_training(model, X_extra, y_extra, X_test, y_test)
+    return mean_proba
+
+
+def SMOTE_LVQ(model, method, X_train, y_train, X_test, y_test,
+              res_strategy=0.8):
+    # Combining SMOTE and LVQ augmentation 80%/20%
+    # SMOTE + LVQ
+    print()
+    print(method, " + LVQ prototype")
+    sm = resampler(method, strategy=res_strategy, random_state=1235)
+    X_res, y_res = sm.fit_resample(X_train, y_train)
+    X_extra, y_extra, _, _, _, _ = lvq_prototypes(5, X_res, y_res,
+                                                  seed=2342,
+                                                  sampling_strategy=1,
+                                                  hot_encoding=False,
+                                                  number_epochs=30)
+    mean_proba = cv_training(model, X_extra, y_extra, X_test, y_test)
+    return mean_proba
+
+
+def one_resampler(model, method, X_train, y_train, X_test, y_test):
+    print()
+    print("one resampler:", method)
+    res = resampler(method, strategy=1.0, random_state=1235)
+    X_res, y_res = res.fit_resample(X_train, y_train)
+    mean_proba = cv_training(model, X_res, y_res, X_test, y_test)
+    return mean_proba
+
+
+def SMOTE_UnderSampler(model, X_train, y_train, X_test, y_test):
+    print()
+    print("SMOTE + RandomUnderSampler")
+    # use SMOTE & RandomUnderSampler
+    over = SMOTE(sampling_strategy=0.5)
+    under = RandomUnderSampler(sampling_strategy=1.0)
+    steps = [('o', over), ('u', under)]
+    pipeline = Pipeline(steps=steps)
+    X_res, y_res = pipeline.fit_resample(X_train, y_train)
+    mean_proba = cv_training(model, X_res, y_res, X_test, y_test)
+    return mean_proba
+
+
 # ----------------------------------------------------------------
 # Example 1: Solar Flare prediction class 0: 1321, class 1: 68
 solar_flare = fetch_datasets()['solar_flare_m0']
@@ -95,134 +215,19 @@ count = Counter(solar_flare.target)
 X = solar_flare.data
 y = solar_flare.target
 y[y == -1] = 0
-# This can fail
-X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(3, X, y)
-model = DecisionTreeClassifier()
-cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-scores = cross_validate(model, X_extra, y_extra, scoring='average_precision',
-                        cv=cv, n_jobs=-1, return_estimator=True)
-print('Mean average precision training set: %.3f'
-      % np.mean(scores['test_score']))
-# Mean average precision on the CV training set
 
 # Now we split between training and test sets
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1,
                                                     stratify=y,
                                                     random_state=42)
-
-# SMOTE + tree-LVQ
-sm = SMOTE(sampling_strategy=0.8, random_state=1235)
-X_res, y_res = sm.fit_resample(X_train, y_train)
-n_prototypes = 5
-count = Counter(y_res)
-nb_extra = count[0] - count[1] - n_prototypes
-X_lvq, y_lvq, W0, W1 = tree_lvq(n_prototypes, X_res, y_res,
-                                kneighbours=200, iter_max_fac=1000,
-                                nb_extra=nb_extra)
-X_extra = np.vstack((X_lvq, W1))
-y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
-
-# SMOTE + kmeans-LVQs
-nb_extra = count[0] - count[1] - n_prototypes * 2
-X_lvq, y_lvq, W0, W1, W0init, W1init, cntr =\
-      kmeans_lvq(n_prototypes, X_res, y_res,
-                 number_epochs=30, append=False,
-                 nb_extra=nb_extra)
-X_extra = np.vstack((X_res, X_lvq, W1, cntr))
-y_extra = np.concatenate((y_res, y_lvq, np.full(2 * n_prototypes, 1)))
-
-
-# Combining SMOTE and LVQ augmentation 80%/20%
-# SMOTE + LVQ
-sm = SMOTE(sampling_strategy=0.8, random_state=1235)
-X_res, y_res = sm.fit_resample(X_train, y_train)
-# BorderlineSMOTE + prototype LVQ seems to be not as good as
-# SMOTE + prototype LVQ
-bsm = BorderlineSMOTE(sampling_strategy=0.8, random_state=1235)
-X_res, y_res = bsm.fit_resample(X_train, y_train)
-#
-X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(5, X_res, y_res,
-                                                    seed=2342,
-                                                    sampling_strategy=1,
-                                                    hot_encoding=False,
-                                                    number_epochs=30)
-
-dprototypes = np.sum((W0 - W1)**2, 0)  # distance between prototypes
-importance = np.flip(np.argsort(np.abs(W0 - W1).T, 1), 1)
-
 model = RandomForestClassifier()
-# Repeated cross-validation training
-cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-scores = cross_validate(model, X_extra, y_extra, scoring='average_precision',
-                        cv=cv, n_jobs=-1, return_estimator=True)
-print('Mean average precision training set: %.3f' %
-      np.mean(scores['test_score']))
-proba = []
-for mod in scores['estimator']:
-    proba.append(mod.predict_proba(X_test))
-mean_proba = np.mean(proba, 0)
-print('Average precision on the test set: %.3f' %
-      average_precision_score(y_test, mean_proba[:, 1]))
-# Mean average precision training set: 0.993
-# Average precision on the test set: 0.25-0.31
-print('Cohen kappa on the test set: %.3f' %
-      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
-# Cohen kappa on the test set: 0.478
-print('Matthews correlation coefficient  on the test set: %.3f' %
-      matthews_corrcoef(y_test, np.rint(mean_proba[:, 1])))
-
-# --------------------------
-# use SMOTE only
-sm = SMOTE(sampling_strategy=1.0)
-X_extra, y_extra = sm.fit_resample(X_train, y_train)
-
-# Bordeline SMOTE only
-bsm = BorderlineSMOTE(sampling_strategy=1.0)
-X_extra, y_extra = bsm.fit_resample(X_train, y_train)
-
-# --------------------------
-# Cross-validation training
-cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-scores = cross_validate(model, X_extra, y_extra, scoring='average_precision',
-                        cv=cv, n_jobs=-1, return_estimator=True)
-print('Mean average precision training set: %.3f' %
-      np.mean(scores['test_score']))
-proba = []
-for mod in scores['estimator']:
-    proba.append(mod.predict_proba(X_test))
-mean_proba = np.mean(proba, 0)
-print('Average precision on the test set: %.3f' %
-      average_precision_score(y_test, mean_proba[:, 1]))
-# Mean average precision training set: 0.988
-# Average precision on the test set: 0.248
-print('Cohen kappa on the test set: %.3f' %
-      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
-print('Matthews correlation coefficient  on the test set: %.3f' %
-      matthews_corrcoef(y_test, np.rint(mean_proba[:, 1])))
-# Cohen kappa on the test set: 0.398
-
-# use SMOTE & RandomUnderSampler
-over = SMOTE(sampling_strategy=0.5)
-under = RandomUnderSampler(sampling_strategy=1.0)
-steps = [('o', over), ('u', under)]
-pipeline = Pipeline(steps=steps)
-X_extra, y_extra = pipeline.fit_resample(X_train, y_train)
-cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-scores = cross_validate(model, X_extra, y_extra, scoring='average_precision',
-                        cv=cv, n_jobs=-1, return_estimator=True)
-print('Mean average precision training set: %.3f' %
-      np.mean(scores['test_score']))
-proba = []
-for mod in scores['estimator']:
-    proba.append(mod.predict_proba(X_test))
-mean_proba = np.mean(proba, 0)
-print('Average precision on the test set: %.3f' %
-      average_precision_score(y_test, mean_proba[:, 1]))
-# Mean average precision training set: 0.971
-# Average precision on the test set: 0.21-0.23
-print('Cohen kappa on the test set: %.3f' %
-      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
-# Cohen kappa on the test set: 0.205
+mp = SMOTE_UnderSampler(model, X_train, y_train, X_test, y_test)
+for method in ["SMOTE", "BordelineSMOTE", "ADASYN"]:
+    one_resampler(model, method, X_train, y_train, X_test, y_test)
+    mp = SMOTE_LVQ(model, method, X_train, y_train, X_test, y_test,
+                   res_strategy=0.8)
+    mp = SMOTE_kmeansLVQ(model, method, X_train, y_train, X_test, y_test)
+    mp = SMOTE_treeLVQ(model, method, X_train, y_train, X_test, y_test)
 
 # ----------------------------------------------------------------
 # Example 2 protein homology prediction problem
@@ -431,88 +436,17 @@ Xas = scaler.transform(Xa)
 X_train, X_test, y_train, y_test = train_test_split(Xas, ya, test_size=0.2,
                                                     stratify=ya,
                                                     random_state=2421)
-# Pure SMOTE
-sm = SMOTE(sampling_strategy=1.0)
-X_res, y_res = sm.fit_resample(X_train, y_train)
-# Check the data augmentation
 model = RandomForestClassifier()
-# Repeated cross-validation training
-cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-scores = cross_validate(model, X_res, y_res, scoring='average_precision',
-                        cv=cv, n_jobs=-1, return_estimator=True)
-print('Mean average precision training set: %.3f' %
-      np.mean(scores['test_score']))
-# Mean average precision training set: 0.998
-proba = []
-for mod in scores['estimator']:
-    proba.append(mod.predict_proba(X_test))
-mean_proba = np.mean(proba, 0)
-print('Average precision on the test set: %.3f' %
-      average_precision_score(y_test, mean_proba[:, 1]))
-# Average precision on the test set: 0.080
-print('Cohen kappa on the test set: %.3f' %
-      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
+mp = SMOTE_UnderSampler(model, X_train, y_train, X_test, y_test)
+for method in ["SMOTE", "BordelineSMOTE", "ADASYN"]:
+    mp = one_resampler(model, method, X_train, y_train, X_test, y_test)
+    mp = SMOTE_LVQ(model, method, X_train, y_train, X_test, y_test,
+                   res_strategy=0.8)
+    mp = SMOTE_kmeansLVQ(model, method, X_train, y_train, X_test, y_test)
+    mp = SMOTE_treeLVQ(model, method, X_train, y_train, X_test, y_test)
 
-#
-sm = SMOTE(sampling_strategy=0.8)
-X_res, y_res = sm.fit_resample(X_train, y_train)
-n_prototypes = 5
-count = Counter(y_res)
-nb_extra = count[0] - count[1] - n_prototypes
-X_lvq, y_lvq, W0, W1 = tree_lvq(n_prototypes, X_res, y_res,
-                                kneighbours=200, iter_max_fac=1000,
-                                nb_extra=nb_extra)
-X_extra = np.vstack((X_lvq, W1))
-y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
-
-
-sm = SMOTE(sampling_strategy=0.5)
-X_res, y_res = sm.fit_resample(X_train, y_train)
-X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(3, X_res, y_res,
-                                                    data_boundary=False,
-                                                    verbose=True,
-                                                    seed=1234,
-                                                    sampling_strategy=0.8,
-                                                    number_epochs=10)
-rus = RandomUnderSampler(sampling_strategy=1.0)
-X_extra, y_extra = rus.fit_resample(X_extra, y_extra)
-
-# Check the data augmentation
-model = RandomForestClassifier()
-# Repeated cross-validation training
-cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-scores = cross_validate(model, X_extra, y_extra, scoring='average_precision',
-                        cv=cv, n_jobs=-1, return_estimator=True)
-print('Mean average precision training set: %.3f' %
-      np.mean(scores['test_score']))
-# Mean average precision training set: 0.998
-proba = []
-for mod in scores['estimator']:
-    proba.append(mod.predict_proba(X_test))
-mean_proba = np.mean(proba, 0)
-print('Average precision on the test set: %.3f' %
-      average_precision_score(y_test, mean_proba[:, 1]))
-# Average precision on the test set: 0.080
-print('Cohen kappa on the test set: %.3f' %
-      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
 # plot the confusion matrix
-cm = confusion_matrix(y_test, np.rint(mean_proba[:, 1]))
+cm = confusion_matrix(y_test, np.rint(mp))
 disp = ConfusionMatrixDisplay(confusion_matrix=cm)
 disp.plot()
 plt.show()
-
-
-# Use XGBoost classifier with early stopping
-X_tr, X_eval, y_tr, y_eval = train_test_split(X_extra, y_extra,
-                                              stratify=y_extra,
-                                              random_state=94)
-
-# Use "hist" for constructing the trees, with early stopping enabled.
-clf = xgb.XGBClassifier(tree_method="hist", eval_metric='aucpr',
-                        early_stopping_rounds=1)
-# Fit the model, test sets are used for early stopping.
-clf.fit(X_tr, y_tr, eval_set=[(X_eval, y_eval)])
-proba_xgb = clf.predict_proba(X_test)
-print('XGBoost Average precision on the test set: %.3f' %
-      average_precision_score(y_test, proba_xgb[:, 1]))
-# XGBoost Average precision on the test set: 0.082
