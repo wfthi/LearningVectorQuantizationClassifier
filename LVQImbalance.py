@@ -717,11 +717,11 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
              iter_max_fac=10,
              verbose=False):
     """
-    A common critic of the SMOTE method is that when generating synthetic 
+    A common critic of the SMOTE method is that when generating synthetic
     xamples it does not take into consideration neighboring examples from
     other classes. This can result in increase in overlapping of classes and
     can introduce additional noise.
-    
+
     Local LVQ learning by splitting the data. kneighbours is found
     around (distance^2 metric) around a randomly chosen minority instance
     and LVQ is used to find a local prototype for each class. n_prototypes
