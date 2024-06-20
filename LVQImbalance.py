@@ -39,6 +39,7 @@ import numpy as np
 from sklearn.metrics import average_precision_score
 from sklearn.metrics import cohen_kappa_score
 from sklearn.neighbors import BallTree
+from sklearn.cluster import KMeans
 
 
 def init_lvq3(X, y, seed=2024):
@@ -91,7 +92,7 @@ def init_lvq3(X, y, seed=2024):
 
 # Train using LVQ 3
 # LVQ can be used to generate prototypes
-def lvq3_train(X, y, W, a, b, max_ep, min_a, e, verbose=False):
+def lvq3_train(X, y, Winit, a, b, max_ep, min_a, e, verbose=False):
     """
     Perform training/fitting using the LVQ3  model
 
@@ -110,7 +111,7 @@ def lvq3_train(X, y, W, a, b, max_ep, min_a, e, verbose=False):
         b < 1
         learning rate decrease rate such that a_new = a_current * b
 
-    W : array-like
+    Winit : array-like
         initial input prototype, see init_lvq3 for more details
 
     max_ep : int
@@ -140,6 +141,7 @@ def lvq3_train(X, y, W, a, b, max_ep, min_a, e, verbose=False):
     c = np.unique(y)
     r = c
     ep = 0
+    W = Winit.copy()
 
     while ep < max_ep:
         if verbose:
@@ -868,7 +870,7 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
         majority = 1
         minority = 0
     wminority = np.where(y == minority)[0]
-    W0, W1 = [], []
+    W0, W1, W0init, W1init = [], [], [], []
     itry_max = 100
     for i in range(n_prototypes):
         cy = 0
@@ -891,6 +893,8 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
             # Find a majority instance among the neighbours
             imajority = indtree[0][1 + np.random.choice(wmajority)]
             Winit = np.stack((X[imajority, :], X[iminority, :]))
+            W0init.append(Winit[0])
+            W1init.append(Winit[1])
             ly = len(y)
             mask = np.zeros(ly, dtype=bool)
             mask[indtree[0][1:]] = True
@@ -956,3 +960,269 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
         X_extra = pos
         y_extra = np.full(nb_extra, 1)
     return X_extra, y_extra, W0, W1
+
+
+def kmeans_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
+               append=True,
+               kneighbours=30, number_epochs=10,
+               data_boundary=True,
+               sampling_strategy=1.0,
+               learning_starting_rate=0.05,
+               learning_rate_decrease=0.95,
+               minimum_learning_rate=0.001,
+               m=0.3,
+               iter_max_fac=10,
+               verbose=False):
+    """
+    Local LVQ learning by splitting the data. kneighbours is found
+    around (distance^2 metric) a randomly chosen minority instance and LVQ
+    is used to find a local prototype for each class. n_prototypes
+    prototype-pairs are created. To syntheize new data, random values are
+    computed and the closest distance prototype-pair is chosen and the
+    distance between the two classes is used to accept the the new values as
+    new data.
+    The strategy is unlike lvq_prototypes where the splitting is done by
+    finding majority and minority data close to the center of K-means.
+
+    Parameters
+    ----------
+    n_prototypes : int
+        the number of prototype per class.
+        n_prototypes = 2 means 2 for each class in y
+
+    X : array-like
+        original input data set scaled to values beween 0 and 1
+
+    y : array-like
+        original input classes
+
+    kneighbours : int, optional, default=30
+        the number of neighbouring points to use for the local learning
+
+    number_epochs : int, optional, default = 10
+        the number of epochs used for the lvq training
+
+    seed : int, optional, default = 1
+        random generator seed value
+
+    append : boolean, optional, default=True
+        append the augmented data to the input
+
+    nb_extra : int, optional, default=None
+        the number of extra minority data point to be generated
+        if None, the diffference in the input between the two
+        classes is used together with the value of sampling_strategy
+
+    sampling_strategy : float, optional, default=1.0
+        the fraction between the two classes.
+        sampling_strategy = 1. means that both classes will be balanced
+
+    verbose : boolean, optional, default=False
+        True to have screen logging
+
+    data_boundary : boolean, optional, default=True
+        if True, bound the augmented data within the range of the input
+
+    learning_starting_rate : float, optional, default=0.05
+        the starting value of the learning rate for the LVQ3
+
+    learning_rate_decrease : float, optional, default=0.95
+        the learning rate decrease factor (< 1)
+
+    minimum_learning_rate : float, optional, default=0.001
+        the minimum learning rate
+
+    m : float, optional, default=0.3
+        a damping factor for the learning between 0 < m < 1
+
+    iter_max_fac : optinal, int, default=10
+        the number of attempts to find a new valid data per required
+        new data
+
+    Returns
+    -------
+    X_extra : list
+        list of original + extra datasets
+        one entry per prototype
+
+    y_extra : list
+        list of original + extra corresponding classes
+
+    W0: list
+        the weights for the class 0
+
+    W1 : list
+        the weights for the class 1
+
+    Example
+    -------
+    >>> import numpy as np
+    >>> from collections import Counter
+    >>> import matplotlib.pyplot as plt
+    >>> from sklearn.datasets import make_moons, make_circles
+    >>> from sklearn.preprocessing import MinMaxScaler
+    >>> from imblearn.datasets import make_imbalance
+    >>> from imblearn.over_sampling import SMOTE
+    >>> from LVQImbalance import kmeans_lvq
+    >>> # create the Moon sample
+    >>> Xmoon, ymoon = make_moons(n_samples=600, noise=0.2, random_state=0)
+    >>> sampling_strategy = {1: 50}
+    >>> X_imb, y_imb = make_imbalance(Xmoon, ymoon,
+    ...                               sampling_strategy=sampling_strategy)
+    >>> scaler = MinMaxScaler(feature_range=(0, 1))
+    >>> scaler.fit(X_imb)
+    >>> Xs = scaler.transform(X_imb)
+    >>> n_prototypes = 10
+    >>> count = Counter(y_imb)
+    >>> nb_extra = count[0] - count[1] - n_prototypes
+    >>> X_lvq, y_lvq, W0, W1, W0init, W1init, cntr =\
+    ...    kmeans_lvq(n_prototypes, Xs, y_imb,
+    ...               number_epochs=10,
+    ...               nb_extra=nb_extra)
+    >>> X_extra = np.vstack((X_lvq, W1))
+    >>> y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
+    >>> w = y_imb == 0
+    >>> size = 10
+    >>> plt.scatter(W0init[:, 0], W0init[:, 1],
+    ...             s=50, marker='o', label='Init 0')
+    >>> plt.scatter(W1init[:, 0], W1init[:, 1],
+    ...             s=50, marker='o', label='Init 1')
+    >>> plt.scatter(X_lvq[:, 0], X_lvq[:, 1], s=20, label='LVQ')
+    >>> plt.scatter(Xs[w, 0], Xs[w, 1], s=size, label='Majority')
+    >>> plt.scatter(Xs[~w, 0], Xs[~w, 1], s=size, label='Minority')
+    >>> plt.scatter(W0[:, 0], W0[:, 1], s=50, marker='*', label='Prototype 0')
+    >>> plt.scatter(W1[:, 0], W1[:, 1], s=50, marker='*', label='Prototype 1')
+    >>> plt.scatter(cntr[:, 0], cntr[:, 1], s=50, marker='+',
+    ...             label='kmeans cntr')
+    >>> plt.xlabel('X1')
+    >>> plt.ylabel('X2')
+    >>> plt.legend()
+    >>> plt.tight_layout()
+    >>> plt.show()
+    >>> # SMOTE + Tree-LVQ
+    >>> sm = SMOTE(sampling_strategy=0.5, random_state=1235)
+    >>> X_res, y_res = sm.fit_resample(Xs, y_imb)
+    >>> n_prototypes = 10
+    >>> count = Counter(y_res)
+    >>> nb_extra = count[0] - count[1] - n_prototypes
+    >>> X_lvq, y_lvq, W0, W1, W0init, W1init, cntr = \
+    ...    kmeans_lvq(n_prototypes, X_res, y_res,
+    ...               append=False,
+    ...               nb_extra=nb_extra,
+    ...               verbose=True)
+    >>> X_extra = np.vstack((X_lvq, W1))
+    >>> y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
+    >>> w = y_imb == 0
+    >>> size = 10
+    >>> plt.scatter(W0init[:, 0], W0init[:, 1],
+    ...             s=50, marker='o', label='Init 0')
+    >>> plt.scatter(W1init[:, 0], W1init[:, 1],
+    ...             s=50, marker='o', label='Init 1')
+    >>> plt.scatter(X_res[:, 0], X_res[:, 1], s=20, label='SMOTE')
+    >>> plt.scatter(X_lvq[:, 0], X_lvq[:, 1], s=20, label='LVQ')
+    >>> plt.scatter(Xs[w, 0], Xs[w, 1], s=size, label='Majority')
+    >>> plt.scatter(Xs[~w, 0], Xs[~w, 1], s=size, label='Minority')
+    >>> plt.scatter(W0[:, 0], W0[:, 1], s=50, marker='*', label='Prototype 0')
+    >>> plt.scatter(W1[:, 0], W1[:, 1], s=50, marker='*', label='Prototype 1')
+    >>> plt.scatter(cntr[:, 0], cntr[:, 1], s=50, marker='+',
+    ...             label='kmeans cntr')
+    >>> plt.xlabel('X1')
+    >>> plt.ylabel('X2')
+    >>> plt.legend()
+    >>> plt.tight_layout()
+    >>> plt.show()
+    """
+    assert X.shape[0] > kneighbours
+    count = Counter(y)
+    if count[0] > count[1]:
+        majority = 0
+        minority = 1
+    else:
+        majority = 1
+        minority = 0
+    wminority = np.where(y == minority)[0]
+    wmajority = np.where(y == majority)[0]
+    treeMinority = BallTree(X[wminority, :], leaf_size=2)
+    treeMajority = BallTree(X[wmajority, :], leaf_size=2)
+    kmeans = KMeans(n_clusters=n_prototypes,
+                    random_state=seed).fit(X[y == minority, :])
+    W0, W1, W0init, W1init = [], [], [], []
+    ly = len(wminority)
+    for i, cntr in enumerate(kmeans.cluster_centers_):
+        if verbose:
+            print('Prototype:', i + 1)
+        # Find the closest minority instance to one of the Kmean
+        # cluster center
+        indMinority = treeMinority.query(cntr.reshape(1, -1),
+                                         k=int(ly / n_prototypes) + 1,
+                                         sort_results=True,
+                                         return_distance=False)[0]
+        iminority = wminority[indMinority[0]]
+        indMajority = treeMajority.query(cntr.reshape(1, -1),
+                                         k=kneighbours + 1,
+                                         sort_results=True,
+                                         return_distance=False)[0]
+        imajority = wmajority[indMajority[0]]
+        Winit = np.stack((X[imajority, :], X[iminority, :]))
+        W0init.append(Winit[0])
+        W1init.append(Winit[1])
+        ly = len(y)
+        mask = np.zeros(ly, dtype=bool)
+        mask[wminority[indMinority[1:]]] = True
+        mask[wmajority[indMajority[1:]]] = True
+        X_train = X[mask, :]
+        y_train = y[mask]
+        # 0.1 < m < 0.5 is a stabilizing constant.
+        counter_y = Counter(y_train)
+        cy = counter_y[minority]
+        if verbose:
+            print("Number of minority sample",  cy)
+        W = lvq3_train(X_train, y_train, Winit,
+                       learning_starting_rate,
+                       learning_rate_decrease,
+                       number_epochs,
+                       minimum_learning_rate,
+                       m,
+                       verbose=verbose)
+        W0.append(W[0][0])
+        W1.append(W[0][1])
+    W0 = np.array(W0)
+    W1 = np.array(W1)
+    # synthetic data generation
+    if nb_extra is None:
+        nb_extra = int(np.ceil(sampling_strategy * count[majority] -
+                               count[minority]))
+    wpos = y == minority
+    Xmin = X[wpos, :].min(0)
+    Xmax = X[wpos, :].max(0)
+    iter = 0
+    npos = 0
+    iter_max = iter_max_fac * nb_extra
+    pos = []
+    nrnd = X.shape[1]
+    while npos < nb_extra and iter < iter_max:
+        iter += 1
+        rng = np.random.default_rng(seed + iter)
+        rnd = rng.random(nrnd)
+        if data_boundary:
+            rnd = rnd * (Xmax - Xmin) + Xmin
+        d0 = np.sum((rnd - W0)**2, 1)
+        d1 = np.sum((rnd - W1)**2, 1)
+        # find the closest prototype pairs and compare
+        # the distances to them
+        imin = np.argmin(d0 + d1)
+        if np.mean((d1[imin] < d0[imin]) * 1) > 0.5:
+            pos.append(rnd)
+            npos += 1
+    if iter >= iter_max:
+        print("Not enough synthetic data generated.")
+        print("Please increase iter_max_fac")
+    pos = np.array(pos)
+    if append:
+        X_extra = np.vstack((X, pos))
+        y_extra = np.append(y, np.full(nb_extra, 1))
+    else:
+        X_extra = pos
+        y_extra = np.full(nb_extra, 1)
+    return X_extra, y_extra, W0, W1, np.array(W0init), np.array(W1init), \
+        kmeans.cluster_centers_
