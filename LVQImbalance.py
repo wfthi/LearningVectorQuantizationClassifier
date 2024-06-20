@@ -40,7 +40,6 @@ from sklearn.metrics import average_precision_score
 from sklearn.metrics import cohen_kappa_score
 from sklearn.neighbors import BallTree
 from sklearn.cluster import KMeans
-from sklearn.datasets import make_swiss_roll
 
 
 def init_lvq3(X, y, seed=2024):
@@ -729,6 +728,11 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
     drawing randomly a sample within the entire dataset. This method can
     result in prototypes that cover more uniformely the feature space.
 
+    The application of SMOTE (0.5-0.8 sampling strategy) + LVQ is very powerful
+    as the two techniques complement well each other.
+
+    See also Bordeline-SMOTE
+
     Parameters
     ----------
     n_prototypes : int
@@ -975,15 +979,16 @@ def kmeans_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
                iter_max_fac=10,
                verbose=False):
     """
-    Local LVQ learning by splitting the data. kneighbours is found
-    around (distance^2 metric) a randomly chosen minority instance and LVQ
+    Local LVQ learning by splitting the data. k-neighbours are found
+    around (distance^2 metric). For each neighbourhood minority LVQ
     is used to find a local prototype for each class. n_prototypes
     prototype-pairs are created. To syntheize new data, random values are
     computed and the closest distance prototype-pair is chosen and the
     distance between the two classes is used to accept the the new values as
     new data.
     The strategy is unlike lvq_prototypes where the splitting is done by
-    finding majority and minority data close to the center of K-means.
+    randomly. Both strategies are devised to capture local variations in
+    the N-dimension.
 
     Parameters
     ----------

@@ -39,8 +39,8 @@
 
     While generating synthetic examples, SMOTE does not take into consideration
     neighboring examples that can be from other classes. This can increase the
-    overlapping of classes and can introduce additional noise. The LVQ generation
-    accounts for the majority class and the synthetic data
+    overlapping of classes and can introduce additional noise. The LVQ
+    generation accounts for the majority class and the synthetic data
 
     Reference
     Munehiro Nakamura, Yusuke Kajiwara, Atsushi Otsuka, and Haruhiko Kimura.
@@ -70,6 +70,7 @@ from imblearn.pipeline import Pipeline
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from LVQImbalance import lvq_prototypes
+from LVQImbalance import tree_lvq
 
 
 # XGBoost cross-validation model
@@ -105,6 +106,19 @@ print('Mean average precision training set: %.3f'
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1,
                                                     stratify=y,
                                                     random_state=42)
+
+# SMOTE + tree-LVQ
+sm = SMOTE(sampling_strategy=0.8, random_state=1235)
+X_res, y_res = sm.fit_resample(X_train, y_train)
+n_prototypes = 5
+count = Counter(y_res)
+nb_extra = count[0] - count[1] - n_prototypes
+X_lvq, y_lvq, W0, W1 = tree_lvq(n_prototypes, X_res, y_res,
+                                kneighbours=200, iter_max_fac=1000,
+                                nb_extra=nb_extra)
+X_extra = np.vstack((X_lvq, W1))
+y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
+
 # Combining SMOTE and LVQ augmentation 80%/20%
 # SMOTE + LVQ
 sm = SMOTE(sampling_strategy=0.8, random_state=1235)
@@ -389,6 +403,41 @@ Xas = scaler.transform(Xa)
 X_train, X_test, y_train, y_test = train_test_split(Xas, ya, test_size=0.2,
                                                     stratify=ya,
                                                     random_state=2421)
+# Pure SMOTE
+sm = SMOTE(sampling_strategy=1.0)
+X_res, y_res = sm.fit_resample(X_train, y_train)
+# Check the data augmentation
+model = RandomForestClassifier()
+# Repeated cross-validation training
+cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+scores = cross_validate(model, X_res, y_res, scoring='average_precision',
+                        cv=cv, n_jobs=-1, return_estimator=True)
+print('Mean average precision training set: %.3f' %
+      np.mean(scores['test_score']))
+# Mean average precision training set: 0.998
+proba = []
+for mod in scores['estimator']:
+    proba.append(mod.predict_proba(X_test))
+mean_proba = np.mean(proba, 0)
+print('Average precision on the test set: %.3f' %
+      average_precision_score(y_test, mean_proba[:, 1]))
+# Average precision on the test set: 0.080
+print('Cohen kappa on the test set: %.3f' %
+      cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
+
+#
+sm = SMOTE(sampling_strategy=0.8)
+X_res, y_res = sm.fit_resample(X_train, y_train)
+n_prototypes = 5
+count = Counter(y_res)
+nb_extra = count[0] - count[1] - n_prototypes
+X_lvq, y_lvq, W0, W1 = tree_lvq(n_prototypes, X_res, y_res,
+                                kneighbours=200, iter_max_fac=1000,
+                                nb_extra=nb_extra)
+X_extra = np.vstack((X_lvq, W1))
+y_extra = np.append(y_lvq, np.full(n_prototypes, 1))
+
+
 sm = SMOTE(sampling_strategy=0.5)
 X_res, y_res = sm.fit_resample(X_train, y_train)
 X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(3, X_res, y_res,
