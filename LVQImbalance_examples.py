@@ -68,6 +68,7 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 from imblearn.pipeline import Pipeline
 from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import BorderlineSMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from LVQImbalance import lvq_prototypes
 from LVQImbalance import tree_lvq
@@ -94,6 +95,7 @@ count = Counter(solar_flare.target)
 X = solar_flare.data
 y = solar_flare.target
 y[y == -1] = 0
+# This can fail
 X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(3, X, y)
 model = DecisionTreeClassifier()
 cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
@@ -134,6 +136,11 @@ y_extra = np.concatenate((y_res, y_lvq, np.full(2 * n_prototypes, 1)))
 # SMOTE + LVQ
 sm = SMOTE(sampling_strategy=0.8, random_state=1235)
 X_res, y_res = sm.fit_resample(X_train, y_train)
+# BorderlineSMOTE + prototype LVQ seems to be not as good as
+# SMOTE + prototype LVQ
+bsm = BorderlineSMOTE(sampling_strategy=0.8, random_state=1235)
+X_res, y_res = bsm.fit_resample(X_train, y_train)
+#
 X_extra, y_extra, Xel, yel, W0, W1 = lvq_prototypes(5, X_res, y_res,
                                                     seed=2342,
                                                     sampling_strategy=1,
@@ -164,9 +171,17 @@ print('Cohen kappa on the test set: %.3f' %
 print('Matthews correlation coefficient  on the test set: %.3f' %
       matthews_corrcoef(y_test, np.rint(mean_proba[:, 1])))
 
+# --------------------------
 # use SMOTE only
 sm = SMOTE(sampling_strategy=1.0)
 X_extra, y_extra = sm.fit_resample(X_train, y_train)
+
+# Bordeline SMOTE only
+bsm = BorderlineSMOTE(sampling_strategy=1.0)
+X_extra, y_extra = bsm.fit_resample(X_train, y_train)
+
+# --------------------------
+# Cross-validation training
 cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
 scores = cross_validate(model, X_extra, y_extra, scoring='average_precision',
                         cv=cv, n_jobs=-1, return_estimator=True)
@@ -182,6 +197,8 @@ print('Average precision on the test set: %.3f' %
 # Average precision on the test set: 0.248
 print('Cohen kappa on the test set: %.3f' %
       cohen_kappa_score(y_test, np.rint(mean_proba[:, 1])))
+print('Matthews correlation coefficient  on the test set: %.3f' %
+      matthews_corrcoef(y_test, np.rint(mean_proba[:, 1])))
 # Cohen kappa on the test set: 0.398
 
 # use SMOTE & RandomUnderSampler
