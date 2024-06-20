@@ -717,9 +717,14 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
              iter_max_fac=10,
              verbose=False):
     """
+    A common critic of the SMOTE method is that when generating synthetic 
+    xamples it does not take into consideration neighboring examples from
+    other classes. This can result in increase in overlapping of classes and
+    can introduce additional noise.
+    
     Local LVQ learning by splitting the data. kneighbours is found
-    around (distance^2 metric) a randomly chosen minority instance and LVQ
-    is used to find a local prototype for each class. n_prototypes
+    around (distance^2 metric) around a randomly chosen minority instance
+    and LVQ is used to find a local prototype for each class. n_prototypes
     prototype-pairs are created. To syntheize new data, random values are
     computed and the closest distance prototype-pair is chosen and the
     distance between the two classes is used to accept the the new values as
@@ -979,13 +984,21 @@ def kmeans_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
                iter_max_fac=10,
                verbose=False):
     """
-    Local LVQ learning by splitting the data. k-neighbours are found
-    around (distance^2 metric). For each neighbourhood minority LVQ
-    is used to find a local prototype for each class. n_prototypes
-    prototype-pairs are created. To syntheize new data, random values are
-    computed and the closest distance prototype-pair is chosen and the
-    distance between the two classes is used to accept the the new values as
-    new data.
+    N-Cluster centers of the minority data are first found using the 
+    Kmeans method. A closest majority and minority instances are starting
+    point for a local LVQ learning by splitting the data. k-neighbours are
+    found around (distance^2 metric). The difference with the tree-LVQ method
+    is that this method use the cluster centeers to ensure that the minority
+    feature space is well sampled.
+    
+    For each neighbourhood minority LVQ is used to find a local prototype for
+    each class. n_prototypes prototype-pairs are created. To syntheize new
+    data, random values are computed and the closest distance prototype-pair is
+    chosen and the distance between the two classes is used to accept the the
+    new values as new data.
+    The cluster center and the prototypes can be added as synthetic data of the
+    minority class.
+
     The strategy is unlike lvq_prototypes where the splitting is done by
     randomly. Both strategies are devised to capture local variations in
     the N-dimension.
