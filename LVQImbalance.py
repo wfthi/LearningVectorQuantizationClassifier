@@ -83,7 +83,7 @@ def init_lvq3(X, y, seed=2024):
     for c in classes:
         idx = rng.choice(ind[y == c], size=1, replace=False)
         train_idx.append(idx[0])
-    print('Train indices:', train_idx)
+    # print('Train indices:', train_idx)
     W = X[train_idx].astype(np.float64)
     mask = np.ones(ly, dtype=bool)
     mask[train_idx] = False
@@ -468,7 +468,7 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
     return X_extra, y_extra
 
 
-def random_split(n_prototypes, X, y, seed=1):
+def random_split(n_prototypes, X, y, seed=1, verbose=False):
     """
     Split the input into n_prototypes batches. It returns a list of
     indices for each batch
@@ -488,6 +488,9 @@ def random_split(n_prototypes, X, y, seed=1):
     seed : int, optional, default = 1
         random generator seed value
 
+    verbose : boolean, optional, default=False
+        True to have screen logging
+
     Return
     ------
      : list of arrays
@@ -502,9 +505,11 @@ def random_split(n_prototypes, X, y, seed=1):
     count = Counter(y)
     ly = len(y)
     rng = np.random.default_rng(seed)
-    print('Split randomly the input dataset into batches')
+    if verbose:
+        print('Split randomly the input dataset into batches')
     for i, sp in enumerate(split):
-        print('Batch ', i + 1, '/', n_prototypes)
+        if verbose:
+            print('Batch ', i + 1, '/', n_prototypes)
         ind = np.arange(0, lind, 1)
         w0 = np.where(yall == 0)[0]
         w1 = np.where(yall == 1)[0]
@@ -543,6 +548,9 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
 
     The generated data will be within the convex hull of the minority data
     if the flag data_boundary is set to True.
+
+    The limitation of the LVQ-based augmentation methods is that the LVQ may be
+    a weak learner where then the prototypes do not represent well the classes.
 
     Parameters
     ----------
@@ -670,19 +678,23 @@ def lvq_prototypes(n_prototypes, X, y, number_epochs=10,
     ind_list = random_split(n_prototypes, X, y, seed=seed)
     W0, W1, Xel, yel = [], [], [], []
     for i, ind in enumerate(ind_list):
-        print('Training batch ', i + 1, '/', n_prototypes)
+        if verbose:
+            print('Training batch ', i + 1, '/', n_prototypes)
         W = train_lvq(X[ind], y[ind], random_seed=i,
-                      verbose=True, number_epochs=number_epochs)
+                      verbose=verbose, number_epochs=number_epochs)
         ypred = lvq3_predict_proba(X[ind], W, len(W))
-        print('LVQ training average precision:',
-              average_precision_score(y[ind], ypred[1, :]))
-        print('LVQ training Cohen kappa:',
-              cohen_kappa_score(y[ind], np.rint(ypred[1, :])))
+        if verbose:
+            print('LVQ training average precision:',
+                  average_precision_score(y[ind], ypred[1, :]))
+            print('LVQ training Cohen kappa:',
+                  cohen_kappa_score(y[ind], np.rint(ypred[1, :])))
         W0.append(W[0][0])  # class 0
         W1.append(W[0][1])
-        print('... augment the data')
+        if verbose:
+            print('... augment the data')
         if data_boundary:
-            print('data_boundary:', data_boundary)
+            if verbose:
+                print('data_boundary:', data_boundary)
         Xe, ye = lvq_extra(X[ind], y[ind], W, verbose=verbose,
                            seed=seed,
                            append=append,
@@ -735,6 +747,8 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
 
     The application of SMOTE (0.5-0.8 sampling strategy) + LVQ is very powerful
     as the two techniques complement well each other.
+
+    SMOTE is the most efficient method is the noise level is low
 
     See also Bordeline-SMOTE
 
@@ -1272,6 +1286,7 @@ def kmeans_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
     if iter >= iter_max:
         print("Not enough synthetic data generated.")
         print("Please increase iter_max_fac")
+        print("Current value, iter_max_fac:", iter_max_fac)
     pos = np.array(pos)
     if append:
         X_extra = np.vstack((X, pos))
@@ -1281,3 +1296,12 @@ def kmeans_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
         y_extra = np.full(nb_extra, 1)
     return X_extra, y_extra, W0, W1, np.array(W0init), np.array(W1init), \
         kmeans.cluster_centers_
+
+
+def feature_importance(W0list, W1list):
+    dprototypes, importance = [], []
+    for W0, W1 in zip(W0list, W1list):
+        # distance between prototypes
+        dprototypes.append(np.sum((W0 - W1)**2, 0))
+        importance.append(np.flip(np.argsort(np.abs(W0 - W1).T, 1), 1))
+    return dprototypes, importance
