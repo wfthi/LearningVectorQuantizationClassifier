@@ -456,15 +456,18 @@ def lvq_extra(X, y, W, sampling_strategy=1., direct_hot_encoding=False,
     # Check
     d0 = np.sum((X_pos_extra - W[0][0])**2, 1)
     d1 = np.sum((X_pos_extra - W[0][1])**2, 1)
-    assert np.count_nonzero((d1 < d0)) == X_pos_extra.shape[0]
+    if majority == 0:
+        assert np.count_nonzero((d1 < d0)) == X_pos_extra.shape[0]
+    else:
+        assert np.count_nonzero((d1 > d0)) == X_pos_extra.shape[0]
     d0 = np.sum((X - W[0][0])**2, 1)
     d1 = np.sum((X - W[0][1])**2, 1)
     if append:
         X_extra = np.vstack((X_pos_extra, X))
-        y_extra = np.append(np.full(X_pos_extra.shape[0], 1), y)
+        y_extra = np.append(np.full(X_pos_extra.shape[0], minority), y)
     else:
         X_extra = X_pos_extra
-        y_extra = np.full(X_pos_extra.shape[0], 1)
+        y_extra = np.full(X_pos_extra.shape[0], minority)
     return X_extra, y_extra
 
 
@@ -930,7 +933,7 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
             counter_y = Counter(y_train)
             cy = counter_y[minority]
             if itry > itry_max:
-                print("Cannot find the vlid split")
+                print("Cannot find the valid split")
                 print("Try a lower number of prototypes or more neighbours")
                 return None, None, None, None
         wminority = wminority[wminority != iminority]
@@ -970,19 +973,24 @@ def tree_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
         # find the closest prototype pairs and compare
         # the distances to them
         imin = np.argmin(d0 + d1)
-        if np.mean((d1[imin] < d0[imin]) * 1) > 0.5:
-            pos.append(rnd)
-            npos += 1
+        if majority == 0:
+            if np.mean((d1[imin] < d0[imin]) * 1) > 0.5:
+                pos.append(rnd)
+                npos += 1
+        else:
+            if np.mean((d1[imin] > d0[imin]) * 1) > 0.5:
+                pos.append(rnd)
+                npos += 1
     if iter >= iter_max:
         print("Not enough synthetic data generated.")
         print("Please increase iter_max_fac")
     pos = np.array(pos)
     if append:
         X_extra = np.vstack((X, pos))
-        y_extra = np.append(y, np.full(nb_extra, 1))
+        y_extra = np.append(y, np.full(nb_extra, minority))
     else:
         X_extra = pos
-        y_extra = np.full(nb_extra, 1)
+        y_extra = np.full(nb_extra, minority)
     return X_extra, y_extra, W0, W1
 
 
@@ -1280,9 +1288,14 @@ def kmeans_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
         # find the closest prototype pairs and compare
         # the distances to them
         imin = np.argmin(d0 + d1)
-        if np.mean((d1[imin] < d0[imin]) * 1) > 0.5:
-            pos.append(rnd)
-            npos += 1
+        if majority == 0:
+            if np.mean((d1[imin] < d0[imin]) * 1) > 0.5:
+                pos.append(rnd)
+                npos += 1
+        else:
+            if np.mean((d1[imin] > d0[imin]) * 1) > 0.5:
+                pos.append(rnd)
+                npos += 1           
     if iter >= iter_max:
         print("Not enough synthetic data generated.")
         print("Please increase iter_max_fac")
@@ -1290,10 +1303,10 @@ def kmeans_lvq(n_prototypes, X, y, nb_extra=None, seed=1,
     pos = np.array(pos)
     if append:
         X_extra = np.vstack((X, pos))
-        y_extra = np.append(y, np.full(nb_extra, 1))
+        y_extra = np.append(y, np.full(nb_extra, minority))
     else:
         X_extra = pos
-        y_extra = np.full(nb_extra, 1)
+        y_extra = np.full(nb_extra, minority)
     return X_extra, y_extra, W0, W1, np.array(W0init), np.array(W1init), \
         kmeans.cluster_centers_
 
